@@ -1,0 +1,181 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// Application Models
+model User {
+  id            String    @id @default(uuid()) @db.Uuid
+  name          String?
+  email         String?   @unique
+  emailVerified DateTime?
+  image         String?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  transcripts         Transcript[]
+  meetings            Meeting[]
+  calendarConnections CalendarConnection[]
+}
+
+model Transcript {
+  id         String           @id @default(cuid())
+  userId     String           @db.Uuid
+  user       User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  title      String
+  sourceType SourceType       @default(RECORDING)
+  status     TranscriptStatus @default(PENDING)
+  duration   Int?
+  audioUrl   String?
+  audioKey   String?
+  rawText    String?
+
+  segments  TranscriptSegment[]
+  speakers  Speaker[]
+  summary   Summary?
+  meeting   Meeting?          @relation(fields: [meetingId], references: [id])
+  meetingId String?           @unique
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([userId])
+  @@index([status])
+  @@index([createdAt])
+}
+
+model TranscriptSegment {
+  id           String     @id @default(cuid())
+  transcriptId String
+  transcript   Transcript @relation(fields: [transcriptId], references: [id], onDelete: Cascade)
+  speakerId    String?
+  speaker      Speaker?   @relation(fields: [speakerId], references: [id])
+  text         String
+  startTime    Float
+  endTime      Float
+  confidence   Float?
+  isEdited     Boolean    @default(false)
+  originalText String?
+
+  createdAt DateTime @default(now())
+
+  @@index([transcriptId])
+  @@index([speakerId])
+}
+
+model Speaker {
+  id           String     @id @default(cuid())
+  transcriptId String
+  transcript   Transcript @relation(fields: [transcriptId], references: [id], onDelete: Cascade)
+  label        String
+  name         String?
+  color        String?
+
+  segments TranscriptSegment[]
+
+  @@unique([transcriptId, label])
+}
+
+model Summary {
+  id           String     @id @default(cuid())
+  transcriptId String     @unique
+  transcript   Transcript @relation(fields: [transcriptId], references: [id], onDelete: Cascade)
+  content      String
+  keyPoints    Json       @default("[]")
+  actionItems  Json       @default("[]")
+  model        String     @default("gpt-4o")
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model Meeting {
+  id              String        @id @default(cuid())
+  userId          String        @db.Uuid
+  user            User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  title           String
+  platform        Platform
+  meetingUrl      String
+  meetingPassword String?
+  scheduledStart  DateTime
+  scheduledEnd    DateTime?
+  actualStart     DateTime?
+  actualEnd       DateTime?
+  status          MeetingStatus @default(SCHEDULED)
+  botStatus       BotStatus?
+  botInstanceId   String?
+  errorMessage    String?
+
+  transcript Transcript?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([userId])
+  @@index([status])
+  @@index([scheduledStart])
+}
+
+model CalendarConnection {
+  id             String           @id @default(cuid())
+  userId         String           @db.Uuid
+  user           User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  provider       CalendarProvider
+  accessToken    String
+  refreshToken   String?
+  tokenExpiresAt DateTime
+  calendarId     String?
+  isActive       Boolean          @default(true)
+  lastSyncAt     DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([userId, provider])
+  @@index([userId])
+}
+
+// Enums
+enum SourceType {
+  RECORDING
+  UPLOAD
+  MEETING
+}
+
+enum TranscriptStatus {
+  PENDING
+  PROCESSING
+  COMPLETED
+  FAILED
+}
+
+enum Platform {
+  ZOOM
+  GOOGLE_MEET
+}
+
+enum MeetingStatus {
+  SCHEDULED
+  IN_PROGRESS
+  COMPLETED
+  CANCELLED
+}
+
+enum BotStatus {
+  SCHEDULED
+  JOINING
+  WAITING_ROOM
+  ACTIVE
+  LEAVING
+  COMPLETED
+  FAILED
+}
+
+enum CalendarProvider {
+  GOOGLE
+  OUTLOOK
+}
