@@ -12,19 +12,73 @@ interface ClientConnection {
   ws: WebSocket
   deepgramConnection: ReturnType<typeof createLiveTranscriptionConnection> | null
   isRecording: boolean
+  subscribedMeetingId: string | null
 }
 
 const clients = new Map<WebSocket, ClientConnection>()
+// Meeting ID → 購読しているWebSocket接続のSet
+const meetingSubscribers = new Map<string, Set<WebSocket>>()
 
-// HTTP server for health checks
-const server = createServer((req, res) => {
+// HTTP server for health checks and broadcast endpoint
+const server = createServer(async (req, res) => {
+  // CORS headers
+  res.setHeader('Access-Control-Allow-Origin', '*')
+  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS')
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, x-broadcast-secret')
+
+  if (req.method === 'OPTIONS') {
+    res.writeHead(204)
+    res.end()
+    return
+  }
+
   if (req.url === '/health') {
     res.writeHead(200, { 'Content-Type': 'application/json' })
     res.end(JSON.stringify({ status: 'ok' }))
-  } else {
-    res.writeHead(404)
-    res.end()
+    return
   }
+
+  // Broadcast endpoint for Webhook → WebSocket
+  if (req.url === '/broadcast' && req.method === 'POST') {
+    // Simple secret check (optional, for security)
+    const secret = req.headers['x-broadcast-secret']
+    const expectedSecret = process.env.BROADCAST_SECRET
+    if (expectedSecret && secret !== expectedSecret) {
+      res.writeHead(401, { 'Content-Type': 'application/json' })
+      res.end(JSON.stringify({ error: 'Unauthorized' }))
+      return
+    }
+
+    let body = ''
+    req.on('data', chunk => { body += chunk })
+    req.on('end', () => {
+      try {
+        const { meetingId, type, data } = JSON.parse(body)
+
+        if (!meetingId) {
+          res.writeHead(400, { 'Content-Type': 'application/json' })
+          res.end(JSON.stringify({ error: 'meetingId required' }))
+          return
+        }
+
+        const subscribers = meetingSubscribers.get(meetingId)
+        const count = broadcastToMeeting(meetingId, { type, ...data })
+
+        console.log(`Broadcast to meeting ${meetingId}: ${count} clients, type: ${type}`)
+
+        res.writeHead(200, { 'Content-Type': 'application/json' })
+        res.end(JSON.stringify({ success: true, clientCount: count }))
+      } catch (error) {
+        console.error('Broadcast error:', error)
+        res.writeHead(400, { 'Content-Type': 'application/json' })
+        res.end(JSON.stringify({ error: 'Invalid JSON' }))
+      }
+    })
+    return
+  }
+
+  res.writeHead(404)
+  res.end()
 })
 
 // WebSocket server with CORS validation
@@ -56,6 +110,7 @@ wss.on('connection', (ws: WebSocket) => {
       ws,
       deepgramConnection: null,
       isRecording: false,
+      subscribedMeetingId: null,
     }
     clients.set(ws, client)
 
@@ -168,6 +223,37 @@ async function handleControlMessage(
       sendMessage(ws, { type: 'pong' })
       break
 
+    case 'subscribe-meeting':
+      const meetingId = message.meetingId as string
+      if (!meetingId) {
+        sendError(ws, 'meetingId required')
+        return
+      }
+
+      // 以前の購読を解除
+      if (client.subscribedMeetingId) {
+        unsubscribeFromMeeting(ws, client.subscribedMeetingId)
+      }
+
+      // 新しい購読を追加
+      if (!meetingSubscribers.has(meetingId)) {
+        meetingSubscribers.set(meetingId, new Set())
+      }
+      meetingSubscribers.get(meetingId)!.add(ws)
+      client.subscribedMeetingId = meetingId
+
+      console.log(`Client subscribed to meeting: ${meetingId}`)
+      sendMessage(ws, { type: 'subscribed', meetingId })
+      break
+
+    case 'unsubscribe-meeting':
+      if (client.subscribedMeetingId) {
+        unsubscribeFromMeeting(ws, client.subscribedMeetingId)
+        client.subscribedMeetingId = null
+        sendMessage(ws, { type: 'unsubscribed' })
+      }
+      break
+
     default:
       console.warn('Unknown message type:', message.type)
   }
@@ -183,6 +269,36 @@ function cleanupClient(client: ClientConnection) {
     client.deepgramConnection = null
   }
   client.isRecording = false
+
+  // Meeting購読を解除
+  if (client.subscribedMeetingId) {
+    unsubscribeFromMeeting(client.ws, client.subscribedMeetingId)
+    client.subscribedMeetingId = null
+  }
+}
+
+function unsubscribeFromMeeting(ws: WebSocket, meetingId: string) {
+  const subscribers = meetingSubscribers.get(meetingId)
+  if (subscribers) {
+    subscribers.delete(ws)
+    if (subscribers.size === 0) {
+      meetingSubscribers.delete(meetingId)
+    }
+  }
+}
+
+function broadcastToMeeting(meetingId: string, message: object): number {
+  const subscribers = meetingSubscribers.get(meetingId)
+  if (!subscribers) return 0
+
+  let count = 0
+  subscribers.forEach(ws => {
+    if (ws.readyState === WebSocket.OPEN) {
+      ws.send(JSON.stringify(message))
+      count++
+    }
+  })
+  return count
 }
 
 function sendMessage(ws: WebSocket, message: object) {

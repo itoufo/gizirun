@@ -2,6 +2,29 @@ import { NextResponse } from 'next/server'
 import { prisma } from '@/lib/db/prisma'
 import { verifyWebhookSignature, type WebhookEvent } from '@/lib/meeting-bot/client'
 
+const WS_SERVER_URL = process.env.WS_SERVER_URL || 'http://localhost:3001'
+const BROADCAST_SECRET = process.env.BROADCAST_SECRET
+
+// WebSocketサーバーにブロードキャスト
+async function broadcastToMeeting(meetingId: string, type: string, data: unknown) {
+  try {
+    const response = await fetch(`${WS_SERVER_URL}/broadcast`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        ...(BROADCAST_SECRET ? { 'x-broadcast-secret': BROADCAST_SECRET } : {}),
+      },
+      body: JSON.stringify({ meetingId, type, data }),
+    })
+
+    if (!response.ok) {
+      console.error('Broadcast failed:', response.status)
+    }
+  } catch (error) {
+    console.error('Failed to broadcast:', error)
+  }
+}
+
 export async function POST(request: Request) {
   try {
     const payload = await request.text()
@@ -132,10 +155,22 @@ export async function POST(request: Request) {
             })
           }
 
-          await prisma.transcriptSegment.create({
+          const createdSegment = await prisma.transcriptSegment.create({
             data: {
               transcriptId: meeting.transcript.id,
               speakerId: speaker.id,
+              text: segment.text,
+              startTime: segment.startTime,
+              endTime: segment.endTime,
+            },
+          })
+
+          // WebSocketでブロードキャスト
+          await broadcastToMeeting(meeting.id, 'transcript.final', {
+            segment: {
+              id: createdSegment.id,
+              speaker: segment.speaker,
+              speakerColor: speaker.color,
               text: segment.text,
               startTime: segment.startTime,
               endTime: segment.endTime,
@@ -145,9 +180,13 @@ export async function POST(request: Request) {
         break
 
       case 'transcript.partial':
-        // Partial transcripts are handled in real-time via WebSocket if needed
-        // For now, we just log them
-        console.log('Partial transcript:', event.data?.transcript?.text)
+        // リアルタイムで中間結果をブロードキャスト
+        if (event.data?.transcript) {
+          await broadcastToMeeting(meeting.id, 'transcript.partial', {
+            speaker: event.data.transcript.speaker,
+            text: event.data.transcript.text,
+          })
+        }
         break
     }
 

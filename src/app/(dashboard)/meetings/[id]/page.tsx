@@ -2,6 +2,7 @@
 
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { useParams, useRouter } from 'next/navigation'
+import { useState, useEffect, useRef, useCallback } from 'react'
 import Link from 'next/link'
 import {
   ArrowLeft,
@@ -19,6 +20,17 @@ import { Badge } from '@/components/ui/Badge'
 import { Skeleton } from '@/components/ui/Skeleton'
 import { cn } from '@/lib/utils/cn'
 import type { Meeting, BotStatus, MeetingStatus } from '@/types/transcript'
+
+const WS_URL = process.env.NEXT_PUBLIC_WS_URL || 'ws://localhost:3001/api/realtime'
+
+interface RealtimeSegment {
+  id: string
+  speaker: string
+  speakerColor?: string
+  text: string
+  startTime: number
+  endTime?: number
+}
 
 interface MeetingWithTranscript extends Omit<Meeting, 'transcript'> {
   transcript?: {
@@ -45,6 +57,13 @@ export default function MeetingDetailPage() {
   const params = useParams()
   const router = useRouter()
   const queryClient = useQueryClient()
+
+  // リアルタイム文字起こし用の状態
+  const [realtimeSegments, setRealtimeSegments] = useState<RealtimeSegment[]>([])
+  const [interimText, setInterimText] = useState<{ speaker: string; text: string } | null>(null)
+  const [wsConnected, setWsConnected] = useState(false)
+  const transcriptContainerRef = useRef<HTMLDivElement>(null)
+  const wsRef = useRef<WebSocket | null>(null)
 
   const { data: meeting, isLoading, error } = useQuery({
     queryKey: ['meeting', params.id],
@@ -85,6 +104,78 @@ export default function MeetingDetailPage() {
       queryClient.invalidateQueries({ queryKey: ['meeting', params.id] })
     },
   })
+
+  // WebSocket接続（ミーティングがアクティブな場合）
+  useEffect(() => {
+    const meetingId = params.id as string
+    if (!meetingId) return
+
+    // アクティブなミーティングの場合のみ接続
+    const isActive = meeting?.botStatus === 'ACTIVE' || meeting?.botStatus === 'JOINING'
+    if (!isActive) return
+
+    const ws = new WebSocket(WS_URL)
+    wsRef.current = ws
+
+    ws.onopen = () => {
+      console.log('WebSocket connected, subscribing to meeting:', meetingId)
+      setWsConnected(true)
+      ws.send(JSON.stringify({ type: 'subscribe-meeting', meetingId }))
+    }
+
+    ws.onmessage = (event) => {
+      try {
+        const data = JSON.parse(event.data)
+        console.log('WebSocket message:', data.type)
+
+        if (data.type === 'transcript.partial') {
+          setInterimText({ speaker: data.speaker || 'Unknown', text: data.text })
+        } else if (data.type === 'transcript.final') {
+          const segment = data.segment
+          setRealtimeSegments((prev) => [
+            ...prev,
+            {
+              id: segment.id,
+              speaker: segment.speaker,
+              speakerColor: segment.speakerColor,
+              text: segment.text,
+              startTime: segment.startTime,
+              endTime: segment.endTime,
+            },
+          ])
+          setInterimText(null)
+        } else if (data.type === 'subscribed') {
+          console.log('Subscribed to meeting:', data.meetingId)
+        }
+      } catch (e) {
+        console.error('Failed to parse WebSocket message:', e)
+      }
+    }
+
+    ws.onclose = () => {
+      console.log('WebSocket disconnected')
+      setWsConnected(false)
+    }
+
+    ws.onerror = (error) => {
+      console.error('WebSocket error:', error)
+    }
+
+    return () => {
+      if (ws.readyState === WebSocket.OPEN) {
+        ws.send(JSON.stringify({ type: 'unsubscribe-meeting' }))
+        ws.close()
+      }
+      wsRef.current = null
+    }
+  }, [params.id, meeting?.botStatus])
+
+  // 自動スクロール
+  useEffect(() => {
+    if (transcriptContainerRef.current) {
+      transcriptContainerRef.current.scrollTop = transcriptContainerRef.current.scrollHeight
+    }
+  }, [realtimeSegments, interimText])
 
   const getBotStatusBadge = (botStatus?: BotStatus | null, status?: MeetingStatus) => {
     if (botStatus === 'ACTIVE') {
@@ -218,11 +309,17 @@ export default function MeetingDetailPage() {
       <div className="grid gap-6 lg:grid-cols-3">
         {/* Transcript */}
         <Card className="lg:col-span-2">
-          <CardHeader>
+          <CardHeader className="flex flex-row items-center justify-between">
             <CardTitle>文字起こし</CardTitle>
+            {wsConnected && (
+              <div className="flex items-center gap-2">
+                <div className="h-2 w-2 animate-pulse rounded-full bg-green-500" />
+                <span className="text-xs text-gray-500">リアルタイム接続中</span>
+              </div>
+            )}
           </CardHeader>
           <CardContent>
-            {!meeting.transcript ? (
+            {!meeting.transcript && realtimeSegments.length === 0 && !interimText ? (
               <p className="text-center text-gray-500 py-8">
                 {meeting.botStatus === 'SCHEDULED'
                   ? '会議開始後に文字起こしが表示されます'
@@ -230,15 +327,19 @@ export default function MeetingDetailPage() {
                   ? '文字起こしを取得中...'
                   : '文字起こしがありません'}
               </p>
-            ) : meeting.transcript.segments.length === 0 ? (
+            ) : (meeting.transcript?.segments.length === 0 && realtimeSegments.length === 0 && !interimText) ? (
               <p className="text-center text-gray-500 py-8">
-                {meeting.transcript.status === 'PROCESSING'
+                {meeting.transcript?.status === 'PROCESSING'
                   ? '処理中...'
                   : '文字起こしがありません'}
               </p>
             ) : (
-              <div className="space-y-4 max-h-[500px] overflow-y-auto">
-                {meeting.transcript.segments.map((segment) => (
+              <div
+                ref={transcriptContainerRef}
+                className="space-y-4 max-h-[500px] overflow-y-auto"
+              >
+                {/* 既存のセグメント（DBから） */}
+                {meeting.transcript?.segments.map((segment) => (
                   <div key={segment.id} className="flex gap-3">
                     <span className="w-14 flex-shrink-0 text-xs text-gray-400 font-mono pt-1">
                       {formatTime(segment.startTime)}
@@ -254,6 +355,39 @@ export default function MeetingDetailPage() {
                     </div>
                   </div>
                 ))}
+
+                {/* リアルタイムセグメント（WebSocketから） */}
+                {realtimeSegments.map((segment) => (
+                  <div key={segment.id} className="flex gap-3">
+                    <span className="w-14 flex-shrink-0 text-xs text-gray-400 font-mono pt-1">
+                      {formatTime(segment.startTime)}
+                    </span>
+                    <div className="flex-1">
+                      <span
+                        className="text-sm font-medium"
+                        style={{ color: segment.speakerColor || '#6B7280' }}
+                      >
+                        {segment.speaker}
+                      </span>
+                      <p className="text-gray-700 mt-0.5">{segment.text}</p>
+                    </div>
+                  </div>
+                ))}
+
+                {/* 中間結果（入力中のテキスト） */}
+                {interimText && (
+                  <div className="flex gap-3 opacity-60">
+                    <span className="w-14 flex-shrink-0 text-xs text-gray-400 font-mono pt-1">
+                      --:--
+                    </span>
+                    <div className="flex-1">
+                      <span className="text-sm font-medium text-gray-500">
+                        {interimText.speaker}
+                      </span>
+                      <p className="text-gray-500 mt-0.5 italic">{interimText.text}</p>
+                    </div>
+                  </div>
+                )}
               </div>
             )}
           </CardContent>
