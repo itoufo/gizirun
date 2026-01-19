@@ -5,7 +5,8 @@ import { createServer } from 'http'
 import { createLiveTranscriptionConnection, LiveTranscriptionEvents } from '../src/lib/transcription/deepgram'
 
 const wsPort = parseInt(process.env.PORT || process.env.WS_PORT || '3001', 10)
-const allowedOrigins = process.env.ALLOWED_ORIGINS?.split(',') || ['http://localhost:3000']
+const allowedOrigins = process.env.ALLOWED_ORIGINS?.split(',').map(o => o.trim()) || []
+const allowAllOrigins = allowedOrigins.length === 0 || allowedOrigins.includes('*')
 
 interface ClientConnection {
   ws: WebSocket
@@ -31,18 +32,21 @@ const wss = new WebSocketServer({
   server,
   path: '/api/realtime',
   verifyClient: (info, callback) => {
-    const origin = info.origin || info.req.headers.origin
-    const isAllowed = !origin || allowedOrigins.some(allowed =>
-      origin === allowed || allowed === '*'
-    )
+    const origin = info.origin || info.req.headers.origin || ''
+    const isAllowed = allowAllOrigins || allowedOrigins.some(allowed => origin === allowed)
+    console.log(`WebSocket connection attempt - Origin: ${origin}, Allowed: ${isAllowed}`)
+    if (!isAllowed) {
+      console.log(`Rejected origin. Allowed origins: ${allowedOrigins.join(', ')}`)
+    }
     callback(isAllowed, isAllowed ? undefined : 403, isAllowed ? undefined : 'Forbidden')
   },
 })
 
 server.listen(wsPort, () => {
-  console.log(`> WebSocket server ready on ws://localhost:${wsPort}/api/realtime`)
-  console.log(`> Health check: http://localhost:${wsPort}/health`)
-  console.log(`> Allowed origins: ${allowedOrigins.join(', ')}`)
+  console.log(`> WebSocket server ready on port ${wsPort}`)
+  console.log(`> Health check: /health`)
+  console.log(`> WebSocket path: /api/realtime`)
+  console.log(`> CORS: ${allowAllOrigins ? 'ALL ORIGINS ALLOWED' : `Allowed: ${allowedOrigins.join(', ')}`}`)
 })
 
 wss.on('connection', (ws: WebSocket) => {
