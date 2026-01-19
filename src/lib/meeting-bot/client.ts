@@ -10,7 +10,7 @@
  * API Documentation: https://docs.meetingbaas.com/
  */
 
-const MEETING_BAAS_API_URL = 'https://api.meetingbaas.com'
+const MEETING_BAAS_API_URL = 'https://api.meetingbaas.com/v2'
 
 interface MeetingBaaSConfig {
   apiKey: string
