@@ -60,7 +60,7 @@ async function apiRequest<T>(
     ...options,
     headers: {
       'Content-Type': 'application/json',
-      'Authorization': `Bearer ${config.apiKey}`,
+      'x-meeting-baas-api-key': config.apiKey,
       ...options.headers,
     },
   })
