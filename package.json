@@ -6,7 +6,7 @@
   "scripts": {
     "dev": "next dev",
     "dev:ws": "tsx watch server/websocket.ts",
-    "build": "next build",
+    "build": "prisma generate && next build",
     "build:ws": "tsc server/websocket.ts --outDir dist --esModuleInterop --module commonjs --skipLibCheck",
     "start": "next start",
     "start:ws": "node dist/server/websocket.js",
