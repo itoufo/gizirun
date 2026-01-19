@@ -81,11 +81,15 @@ export async function createBot(params: CreateBotParams): Promise<Bot> {
     meeting_url: params.meetingUrl,
     bot_name: params.botName || 'Notta Bot',
     recording_mode: params.recordingMode || 'audio_only',
-    transcription: params.transcriptionEnabled ?? true,
+  }
+
+  // Enable speech-to-text transcription
+  if (params.transcriptionEnabled !== false) {
+    body.speech_to_text = 'Gladia'
   }
 
   if (params.joinAt) {
-    body.join_at = params.joinAt.toISOString()
+    body.start_time = params.joinAt.toISOString()
   }
 
   if (params.webhookUrl) {
