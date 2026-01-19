@@ -89,7 +89,7 @@ export async function createBot(params: CreateBotParams): Promise<Bot> {
   }
 
   if (params.joinAt) {
-    body.start_time = params.joinAt.toISOString()
+    body.start_time = Math.floor(params.joinAt.getTime() / 1000)
   }
 
   if (params.webhookUrl) {
