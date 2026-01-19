@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server'
 import { auth } from '@/lib/auth/auth'
 import { prisma } from '@/lib/db/prisma'
 import { transcribeAudio } from '@/lib/transcription/assemblyai'
+import { getDownloadUrl } from '@/lib/storage/supabase'
 
 export async function POST(request: Request) {
   try {
@@ -11,11 +12,11 @@ export async function POST(request: Request) {
     }
 
     const body = await request.json()
-    const { title, audioUrl, audioKey } = body
+    const { title, audioKey } = body
 
-    if (!title || !audioUrl) {
+    if (!title || !audioKey) {
       return NextResponse.json(
-        { error: 'title and audioUrl are required' },
+        { error: 'title and audioKey are required' },
         { status: 400 }
       )
     }
@@ -26,14 +27,13 @@ export async function POST(request: Request) {
         userId: session.user.id,
         title,
         sourceType: 'UPLOAD',
-        audioUrl,
         audioKey,
         status: 'PROCESSING',
       },
     })
 
     // Start transcription (async)
-    processTranscription(transcript.id, audioUrl).catch((error) => {
+    processTranscription(transcript.id, audioKey).catch((error) => {
       console.error('Transcription processing failed:', error)
     })
 
@@ -47,8 +47,11 @@ export async function POST(request: Request) {
   }
 }
 
-async function processTranscription(transcriptId: string, audioUrl: string) {
+async function processTranscription(transcriptId: string, audioKey: string) {
   try {
+    // Get signed URL for AssemblyAI to access the file (valid for 1 hour)
+    const audioUrl = await getDownloadUrl(audioKey, 3600)
+
     // Call AssemblyAI
     const result = await transcribeAudio(audioUrl)
 

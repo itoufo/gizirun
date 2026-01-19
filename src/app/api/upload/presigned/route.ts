@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server'
 import { auth } from '@/lib/auth/auth'
-import { getUploadPresignedUrl, generateFileKey } from '@/lib/storage/s3'
+import { getUploadUrl, generateFileKey } from '@/lib/storage/supabase'
 
 const MAX_FILE_SIZE = 500 * 1024 * 1024 // 500MB
 
@@ -51,9 +51,13 @@ export async function POST(request: Request) {
     }
 
     const key = generateFileKey(session.user.id, fileName)
-    const result = await getUploadPresignedUrl(key, fileType)
+    const result = await getUploadUrl(key)
 
-    return NextResponse.json(result)
+    return NextResponse.json({
+      uploadUrl: result.signedUrl,
+      token: result.token,
+      key: result.key,
+    })
   } catch (error) {
     console.error('Failed to generate presigned URL:', error)
     return NextResponse.json(

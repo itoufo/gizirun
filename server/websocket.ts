@@ -1,7 +1,11 @@
+import dotenv from 'dotenv'
+dotenv.config({ path: '.env.local' })
 import { WebSocketServer, WebSocket } from 'ws'
+import { createServer } from 'http'
 import { createLiveTranscriptionConnection, LiveTranscriptionEvents } from '../src/lib/transcription/deepgram'
 
-const wsPort = parseInt(process.env.WS_PORT || '3001', 10)
+const wsPort = parseInt(process.env.PORT || process.env.WS_PORT || '3001', 10)
+const allowedOrigins = process.env.ALLOWED_ORIGINS?.split(',') || ['http://localhost:3000']
 
 interface ClientConnection {
   ws: WebSocket
@@ -11,13 +15,35 @@ interface ClientConnection {
 
 const clients = new Map<WebSocket, ClientConnection>()
 
-// Standalone WebSocket server on separate port
-const wss = new WebSocketServer({
-  port: wsPort,
-  path: '/api/realtime',
+// HTTP server for health checks
+const server = createServer((req, res) => {
+  if (req.url === '/health') {
+    res.writeHead(200, { 'Content-Type': 'application/json' })
+    res.end(JSON.stringify({ status: 'ok' }))
+  } else {
+    res.writeHead(404)
+    res.end()
+  }
 })
 
-console.log(`> WebSocket server ready on ws://localhost:${wsPort}/api/realtime`)
+// WebSocket server with CORS validation
+const wss = new WebSocketServer({
+  server,
+  path: '/api/realtime',
+  verifyClient: (info, callback) => {
+    const origin = info.origin || info.req.headers.origin
+    const isAllowed = !origin || allowedOrigins.some(allowed =>
+      origin === allowed || allowed === '*'
+    )
+    callback(isAllowed, isAllowed ? undefined : 403, isAllowed ? undefined : 'Forbidden')
+  },
+})
+
+server.listen(wsPort, () => {
+  console.log(`> WebSocket server ready on ws://localhost:${wsPort}/api/realtime`)
+  console.log(`> Health check: http://localhost:${wsPort}/health`)
+  console.log(`> Allowed origins: ${allowedOrigins.join(', ')}`)
+})
 
 wss.on('connection', (ws: WebSocket) => {
     console.log('Client connected')
@@ -34,11 +60,15 @@ wss.on('connection', (ws: WebSocket) => {
         // Check if it's a control message (JSON) or audio data (Buffer)
         if (typeof data === 'string' || (Buffer.isBuffer(data) && data.toString().startsWith('{'))) {
           const message = JSON.parse(data.toString())
+          console.log('Control message:', message.type)
           await handleControlMessage(client, message)
-        } else if (Buffer.isBuffer(data) && client.isRecording && client.deepgramConnection) {
-          // Forward audio data to Deepgram - convert Buffer to ArrayBuffer
-          const arrayBuffer = data.buffer.slice(data.byteOffset, data.byteOffset + data.byteLength)
-          client.deepgramConnection.send(arrayBuffer)
+        } else if (Buffer.isBuffer(data)) {
+          console.log('Audio data received:', data.length, 'bytes, isRecording:', client.isRecording)
+          if (client.isRecording && client.deepgramConnection) {
+            // Forward audio data to Deepgram - convert Buffer to ArrayBuffer
+            const arrayBuffer = data.buffer.slice(data.byteOffset, data.byteOffset + data.byteLength)
+            client.deepgramConnection.send(arrayBuffer)
+          }
         }
       } catch (error) {
         console.error('Error processing message:', error)

@@ -30,10 +30,12 @@ export default function RecordPage() {
   const transcriptRef = useRef<HTMLDivElement>(null)
   const segmentIdCounter = useRef(0)
 
-  // Determine WebSocket URL (WebSocket server runs on separate port)
-  const wsUrl = typeof window !== 'undefined'
-    ? `ws://${window.location.hostname}:3001/api/realtime`
-    : ''
+  // Refs to track latest state for callbacks
+  const isConnectedRef = useRef(false)
+  const isPausedRef = useRef(false)
+
+  // Determine WebSocket URL (Railway in production, localhost in dev)
+  const wsUrl = process.env.NEXT_PUBLIC_WS_URL || 'ws://localhost:3001/api/realtime'
 
   // WebSocket connection
   const {
@@ -58,6 +60,11 @@ export default function RecordPage() {
     },
   })
 
+  // Keep refs in sync with state
+  useEffect(() => {
+    isConnectedRef.current = isConnected
+  }, [isConnected])
+
   // Audio recorder
   const {
     isRecording,
@@ -69,7 +76,8 @@ export default function RecordPage() {
     resumeRecording,
   } = useAudioRecorder({
     onAudioData: (data) => {
-      if (isConnected && !isPaused) {
+      // Use refs to get the latest values
+      if (isConnectedRef.current && !isPausedRef.current) {
         send(data)
       }
     },
@@ -77,6 +85,11 @@ export default function RecordPage() {
       setError(`マイクエラー: ${err.message}`)
     },
   })
+
+  // Keep isPaused ref in sync
+  useEffect(() => {
+    isPausedRef.current = isPaused
+  }, [isPaused])
 
   const handleTranscript = useCallback((data: TranscriptMessage) => {
     if (data.isFinal && data.text.trim()) {

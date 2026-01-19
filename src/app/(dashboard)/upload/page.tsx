@@ -25,7 +25,7 @@ export default function UploadPage() {
 
   const uploadMutation = useMutation({
     mutationFn: async (file: File) => {
-      // 1. Get presigned URL
+      // 1. Get signed upload URL from Supabase Storage
       const presignedRes = await fetch('/api/upload/presigned', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -37,9 +37,9 @@ export default function UploadPage() {
       })
 
       if (!presignedRes.ok) throw new Error('Failed to get upload URL')
-      const { uploadUrl, key, publicUrl } = await presignedRes.json()
+      const { uploadUrl, token, key } = await presignedRes.json()
 
-      // 2. Upload to S3
+      // 2. Upload to Supabase Storage
       const uploadRes = await fetch(uploadUrl, {
         method: 'PUT',
         body: file,
@@ -56,7 +56,6 @@ export default function UploadPage() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           title: title || file.name.replace(/\.[^/.]+$/, ''),
-          audioUrl: publicUrl,
           audioKey: key,
         }),
       })
