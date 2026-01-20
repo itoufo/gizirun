@@ -47,11 +47,13 @@ export async function analyzeTopics(params: AnalyzeTopicParams): Promise<TopicAn
     ? params.previousTopics.slice(-5).join(' → ')
     : 'なし'
 
+  const needsMainTopic = !params.mainTopic
+
   const systemPrompt = `あなたは会議ファシリテーターのAIアシスタントです。
 会議の文字起こしを分析し、トピックの流れを追跡してください。
 
 【分析のポイント】
-- メイントピック: 会議の主題（${params.isFirstAnalysis ? '今回検出してください' : '既に検出済みなら維持'}）
+- メイントピック: 会議の主題（${needsMainTopic ? '必ず検出してください。挨拶や雑談でも「関係構築」「アイスブレイク」等のトピックを設定してください' : '既に検出済み: ' + params.mainTopic}）
 - 現在のトピック: 直近の発言で議論されているトピック
 - 脱線度(driftScore): 0-100の数値
   - 0-30: メイントピックに沿った議論
@@ -66,7 +68,7 @@ export async function analyzeTopics(params: AnalyzeTopicParams): Promise<TopicAn
 
 以下のJSON形式で回答してください：
 {
-  "mainTopic": "会議の主題（初回分析時のみ設定、それ以外はnull）",
+  "mainTopic": "会議の主題（未検出の場合は必ず設定、検出済みならnull）",
   "currentTopic": "現在議論されているトピック",
   "driftScore": 0-100の数値,
   "driftReason": "脱線理由（driftScore >= 50の場合のみ）",
@@ -124,7 +126,8 @@ ${segmentsText}
   const result = JSON.parse(content)
 
   return {
-    mainTopic: params.isFirstAnalysis ? (result.mainTopic || null) : null,
+    // mainTopicがまだ未設定の場合は毎回検出を試みる
+    mainTopic: needsMainTopic ? (result.mainTopic || '会話') : null,
     currentTopic: result.currentTopic || '不明',
     driftScore: Math.min(100, Math.max(0, Number(result.driftScore) || 0)),
     driftReason: result.driftScore >= 50 ? (result.driftReason || null) : null,
