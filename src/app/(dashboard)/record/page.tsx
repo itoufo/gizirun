@@ -476,15 +476,15 @@ export default function RecordPage() {
         </p>
       </div>
 
-      {/* Facilitator Panel - shown when recording */}
-      {isRecording && (
+      {/* Facilitator Panel - shown when session exists (recording started) or has topic data */}
+      {(sessionId || topicState || facilitatorAlerts.length > 0) && (
         <div className="w-80 flex-shrink-0">
           <div className="sticky top-6">
             <FacilitatorPanel
               topicState={topicState}
               alerts={facilitatorAlerts}
               onAcknowledgeAlert={handleAcknowledgeAlert}
-              isConnected={isConnected}
+              isConnected={isRecording && isConnected}
             />
           </div>
         </div>
