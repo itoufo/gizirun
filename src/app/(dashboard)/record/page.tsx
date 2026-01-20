@@ -190,7 +190,8 @@ export default function RecordPage() {
     startTime: number
   }) => {
     const currentSessionId = sessionIdRef.current
-    if (!currentSessionId) return
+    const currentTranscriptId = transcriptIdRef.current
+    if (!currentSessionId || !currentTranscriptId) return
 
     try {
       setIsSaving(true)
@@ -200,6 +201,7 @@ export default function RecordPage() {
         body: JSON.stringify({
           segment,
           duration: durationRef.current,
+          transcriptId: currentTranscriptId,
         }),
       })
 
@@ -220,7 +222,7 @@ export default function RecordPage() {
   const completeRecordingSession = useCallback(async () => {
     const currentSessionId = sessionIdRef.current
     const currentTranscriptId = transcriptIdRef.current
-    if (!currentSessionId) return currentTranscriptId
+    if (!currentSessionId || !currentTranscriptId) return currentTranscriptId
 
     try {
       const response = await fetch(`/api/recording-sessions/${currentSessionId}/complete`, {
@@ -229,6 +231,7 @@ export default function RecordPage() {
         body: JSON.stringify({
           duration: durationRef.current,
           title: title || undefined,
+          transcriptId: currentTranscriptId,
         }),
       })
 

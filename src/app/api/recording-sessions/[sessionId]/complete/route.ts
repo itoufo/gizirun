@@ -1,12 +1,8 @@
 import { NextResponse } from 'next/server'
 import { auth } from '@/lib/auth/auth'
 import { prisma } from '@/lib/db/prisma'
-import {
-  getRecordingSession,
-  deleteRecordingSession,
-} from '@/lib/recording/session-manager'
 
-// 録音完了
+// 録音完了 - 直接DB更新（サーバーレス対応）
 export async function POST(
   request: Request,
   { params }: { params: Promise<{ sessionId: string }> }
@@ -19,21 +15,24 @@ export async function POST(
 
     const { sessionId } = await params
     const body = await request.json().catch(() => ({}))
-    const { duration, title } = body
+    const { duration, title, transcriptId } = body
 
-    const recordingSession = getRecordingSession(sessionId)
-    if (!recordingSession) {
-      return NextResponse.json({ error: 'Session not found' }, { status: 404 })
+    // transcriptIdが必須
+    if (!transcriptId) {
+      console.log(`[Complete] No transcriptId provided, sessionId: ${sessionId}`)
+      return NextResponse.json({ error: 'transcriptId is required' }, { status: 400 })
     }
 
-    if (recordingSession.userId !== session.user.id) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 403 })
-    }
+    // Transcriptが存在し、ユーザーのものであることを確認
+    const transcript = await prisma.transcript.findFirst({
+      where: {
+        id: transcriptId,
+        userId: session.user.id,
+      },
+    })
 
-    // 残りのセグメントを保存
-    if (recordingSession.pendingSegments.length > 0) {
-      await saveRemainingSegments(recordingSession)
-      console.log(`[RecordingSession] Saved remaining ${recordingSession.pendingSegments.length} segments for session: ${sessionId}`)
+    if (!transcript) {
+      return NextResponse.json({ error: 'Transcript not found' }, { status: 404 })
     }
 
     // Transcriptを完了に更新
@@ -41,6 +40,7 @@ export async function POST(
       status: 'COMPLETED'
       duration?: number
       title?: string
+      rawText?: string
     } = {
       status: 'COMPLETED',
     }
@@ -53,19 +53,26 @@ export async function POST(
       updateData.title = title
     }
 
-    const transcript = await prisma.transcript.update({
-      where: { id: recordingSession.transcriptId },
+    // rawTextを全セグメントから生成
+    const allSegments = await prisma.transcriptSegment.findMany({
+      where: { transcriptId },
+      orderBy: { startTime: 'asc' },
+    })
+
+    if (allSegments.length > 0) {
+      updateData.rawText = allSegments.map(s => s.text).join('\n')
+    }
+
+    const updatedTranscript = await prisma.transcript.update({
+      where: { id: transcriptId },
       data: updateData,
     })
 
-    // セッションをクリーンアップ
-    deleteRecordingSession(sessionId)
-
-    console.log(`[RecordingSession] Session completed: ${sessionId}, transcriptId: ${transcript.id}`)
+    console.log(`[Complete] Session completed: ${sessionId}, transcriptId: ${transcriptId}, segments: ${allSegments.length}`)
 
     return NextResponse.json({
       success: true,
-      transcriptId: transcript.id,
+      transcriptId: updatedTranscript.id,
     })
   } catch (error) {
     console.error('Failed to complete recording session:', error)
@@ -74,78 +81,4 @@ export async function POST(
       { status: 500 }
     )
   }
-}
-
-// 残りのセグメントをDBに保存
-async function saveRemainingSegments(recordingSession: {
-  transcriptId: string
-  pendingSegments: Array<{
-    speaker: number
-    text: string
-    startTime: number
-    endTime?: number
-  }>
-  duration: number
-}) {
-  if (recordingSession.pendingSegments.length === 0) return
-
-  // 話者の作成/取得
-  const speakerLabels = [...new Set(recordingSession.pendingSegments.map(s => `話者 ${s.speaker + 1}`))]
-
-  // 既存の話者を取得
-  const existingSpeakers = await prisma.speaker.findMany({
-    where: {
-      transcriptId: recordingSession.transcriptId,
-      label: { in: speakerLabels },
-    },
-  })
-
-  const speakerMap = new Map(existingSpeakers.map(s => [s.label, s.id]))
-
-  // 新しい話者を作成
-  const newSpeakerLabels = speakerLabels.filter(label => !speakerMap.has(label))
-  if (newSpeakerLabels.length > 0) {
-    const colors = ['#3B82F6', '#10B981', '#F97316', '#8B5CF6', '#EC4899']
-    const newSpeakers = await prisma.$transaction(
-      newSpeakerLabels.map((label, index) =>
-        prisma.speaker.create({
-          data: {
-            transcriptId: recordingSession.transcriptId,
-            label,
-            color: colors[(existingSpeakers.length + index) % colors.length],
-          },
-        })
-      )
-    )
-    newSpeakers.forEach(s => speakerMap.set(s.label, s.id))
-  }
-
-  // セグメントを作成
-  const segmentsData = recordingSession.pendingSegments.map(seg => ({
-    transcriptId: recordingSession.transcriptId,
-    speakerId: speakerMap.get(`話者 ${seg.speaker + 1}`),
-    text: seg.text,
-    startTime: seg.startTime,
-    endTime: seg.endTime ?? seg.startTime + 1,
-  }))
-
-  await prisma.transcriptSegment.createMany({
-    data: segmentsData,
-  })
-
-  // Transcriptのテキストを更新
-  const allSegments = await prisma.transcriptSegment.findMany({
-    where: { transcriptId: recordingSession.transcriptId },
-    orderBy: { startTime: 'asc' },
-  })
-
-  const rawText = allSegments.map(s => s.text).join('\n')
-
-  await prisma.transcript.update({
-    where: { id: recordingSession.transcriptId },
-    data: {
-      rawText,
-      duration: Math.ceil(recordingSession.duration),
-    },
-  })
 }
