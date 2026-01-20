@@ -1,7 +1,7 @@
 'use client'
 
 import { useState } from 'react'
-import { AlertTriangle, Check, MessageSquare, Target, TrendingDown } from 'lucide-react'
+import { AlertTriangle, Check, Coins, MessageSquare, Target, TrendingDown } from 'lucide-react'
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/Card'
 import { Button } from '@/components/ui/Button'
 import { Badge } from '@/components/ui/Badge'
@@ -26,11 +26,18 @@ export interface TopicState {
   driftScore: number
 }
 
+interface UsageStats {
+  totalCost: number
+  totalCostJPY: number
+  callCount: number
+}
+
 interface FacilitatorPanelProps {
   topicState: TopicState | null
   alerts: FacilitatorAlert[]
   onAcknowledgeAlert?: (alertId: string) => void
   isConnected?: boolean
+  usageStats?: UsageStats | null
 }
 
 export function FacilitatorPanel({
@@ -38,6 +45,7 @@ export function FacilitatorPanel({
   alerts,
   onAcknowledgeAlert,
   isConnected = false,
+  usageStats,
 }: FacilitatorPanelProps) {
   const [expandedAlerts, setExpandedAlerts] = useState<Set<string>>(new Set())
 
@@ -246,6 +254,24 @@ export function FacilitatorPanel({
             <p className="text-sm text-gray-500 text-center">
               アラートはありません
             </p>
+          </div>
+        )}
+
+        {/* AI Usage Stats */}
+        {usageStats && usageStats.callCount > 0 && (
+          <div className="border-t pt-3 mt-3">
+            <div className="flex items-center gap-1 mb-2">
+              <Coins className="h-3 w-3 text-gray-400" />
+              <span className="text-xs text-gray-500">AI通信費用</span>
+            </div>
+            <div className="flex items-center justify-between">
+              <span className="text-lg font-semibold text-gray-900">
+                ¥{usageStats.totalCostJPY.toLocaleString()}
+              </span>
+              <span className="text-xs text-gray-400">
+                {usageStats.callCount}回の分析
+              </span>
+            </div>
           </div>
         )}
       </CardContent>
