@@ -48,3 +48,4 @@ prisma/*.db-journal
 logs/
 *.log
 cache/
+.git-worktrees/

@@ -2,27 +2,84 @@ import { NextResponse } from 'next/server'
 import { prisma } from '@/lib/db/prisma'
 import { verifyWebhookSignature, type WebhookEvent } from '@/lib/meeting-bot/client'
 
+// BUG-002 FIX: Warn if WS_SERVER_URL is not configured in production
 const WS_SERVER_URL = process.env.WS_SERVER_URL || 'http://localhost:3001'
 const BROADCAST_SECRET = process.env.BROADCAST_SECRET
+const IS_PRODUCTION = process.env.NODE_ENV === 'production'
 
-// WebSocketサーバーにブロードキャスト
-async function broadcastToMeeting(meetingId: string, type: string, data: unknown) {
-  try {
-    const response = await fetch(`${WS_SERVER_URL}/broadcast`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        ...(BROADCAST_SECRET ? { 'x-broadcast-secret': BROADCAST_SECRET } : {}),
-      },
-      body: JSON.stringify({ meetingId, type, data }),
-    })
+if (IS_PRODUCTION && !process.env.WS_SERVER_URL) {
+  console.error('WARNING: WS_SERVER_URL is not set in production. Real-time transcription will not work.')
+}
 
-    if (!response.ok) {
-      console.error('Broadcast failed:', response.status)
-    }
-  } catch (error) {
-    console.error('Failed to broadcast:', error)
+// BUG-008 FIX: Add retry logic for broadcast
+async function broadcastToMeeting(
+  meetingId: string,
+  type: string,
+  data: unknown,
+  retries = 2
+): Promise<boolean> {
+  // BUG-002 FIX: Skip broadcast entirely in production if WS_SERVER_URL is not configured
+  if (IS_PRODUCTION && !process.env.WS_SERVER_URL) {
+    console.warn('Skipping broadcast: WS_SERVER_URL not configured in production')
+    return false
   }
+
+  for (let attempt = 0; attempt <= retries; attempt++) {
+    try {
+      const response = await fetch(`${WS_SERVER_URL}/broadcast`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(BROADCAST_SECRET ? { 'x-broadcast-secret': BROADCAST_SECRET } : {}),
+        },
+        body: JSON.stringify({ meetingId, type, data }),
+      })
+
+      if (response.ok) {
+        return true
+      }
+
+      console.error(`Broadcast failed (attempt ${attempt + 1}/${retries + 1}):`, response.status)
+
+      // Don't retry on auth errors
+      if (response.status === 401 || response.status === 403) {
+        console.error('Broadcast auth failed - check BROADCAST_SECRET configuration')
+        return false
+      }
+    } catch (error) {
+      console.error(`Broadcast error (attempt ${attempt + 1}/${retries + 1}):`, error)
+    }
+
+    // Wait before retry (exponential backoff)
+    if (attempt < retries) {
+      await new Promise(resolve => setTimeout(resolve, 100 * Math.pow(2, attempt)))
+    }
+  }
+
+  return false
+}
+
+// BUG-005 FIX: Helper to ensure transcript exists (atomic upsert for P2002 race condition)
+async function ensureTranscript(meeting: { id: string; userId: string; title: string; transcript: { id: string } | null }) {
+  if (meeting.transcript) {
+    return meeting.transcript
+  }
+
+  // Use upsert to handle concurrent webhook requests (prevents P2002)
+  const transcript = await prisma.transcript.upsert({
+    where: { meetingId: meeting.id },
+    update: {}, // No update needed - just return existing
+    create: {
+      userId: meeting.userId,
+      title: meeting.title,
+      sourceType: 'MEETING',
+      status: 'PROCESSING',
+      meetingId: meeting.id,
+    },
+  })
+
+  console.log('Ensured transcript for meeting:', meeting.id, 'transcript:', transcript.id)
+  return transcript
 }
 
 export async function POST(request: Request) {
@@ -129,13 +186,15 @@ export async function POST(request: Request) {
 
       case 'transcript.final':
         // Add transcript segment
-        if (event.data?.transcript && meeting.transcript) {
+        if (event.data?.transcript) {
+          // BUG-005 FIX: Ensure transcript exists (handles race condition)
+          const transcript = await ensureTranscript(meeting)
           const segment = event.data.transcript
 
           // Find or create speaker
           let speaker = await prisma.speaker.findFirst({
             where: {
-              transcriptId: meeting.transcript.id,
+              transcriptId: transcript.id,
               label: segment.speaker,
             },
           })
@@ -143,12 +202,12 @@ export async function POST(request: Request) {
           if (!speaker) {
             const speakerColors = ['#3B82F6', '#10B981', '#F59E0B', '#EF4444', '#8B5CF6']
             const existingSpeakers = await prisma.speaker.count({
-              where: { transcriptId: meeting.transcript.id },
+              where: { transcriptId: transcript.id },
             })
 
             speaker = await prisma.speaker.create({
               data: {
-                transcriptId: meeting.transcript.id,
+                transcriptId: transcript.id,
                 label: segment.speaker,
                 color: speakerColors[existingSpeakers % speakerColors.length],
               },
@@ -157,7 +216,7 @@ export async function POST(request: Request) {
 
           const createdSegment = await prisma.transcriptSegment.create({
             data: {
-              transcriptId: meeting.transcript.id,
+              transcriptId: transcript.id,
               speakerId: speaker.id,
               text: segment.text,
               startTime: segment.startTime,

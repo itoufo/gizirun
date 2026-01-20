@@ -67,8 +67,25 @@ export async function POST(request: Request) {
 
     // Schedule bot via Meeting BaaS API
     try {
-      const baseUrl = process.env.NEXT_PUBLIC_APP_URL || process.env.VERCEL_URL
-      const webhookUrl = baseUrl ? `${baseUrl}/api/webhooks/meeting-bot` : undefined
+      // Build webhook URL - NEXT_PUBLIC_APP_URL must include protocol (https://)
+      // VERCEL_URL doesn't include protocol, so we add it as fallback
+      let baseUrl = process.env.NEXT_PUBLIC_APP_URL
+      if (!baseUrl && process.env.VERCEL_URL) {
+        baseUrl = `https://${process.env.VERCEL_URL}`
+      }
+
+      let webhookUrl: string | undefined
+      if (baseUrl) {
+        try {
+          webhookUrl = new URL('/api/webhooks/meeting-bot', baseUrl).toString()
+        } catch (e) {
+          console.error('Invalid base URL for webhook:', baseUrl)
+        }
+      }
+
+      if (!webhookUrl) {
+        console.warn('Webhook URL not configured - real-time transcription will not work')
+      }
 
       const bot = await createBot({
         meetingUrl: validatedData.meetingUrl,
