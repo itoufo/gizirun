@@ -18,6 +18,12 @@ async function broadcastToMeeting(
   data: unknown,
   retries = 2
 ): Promise<boolean> {
+  // BUG-002 FIX: Skip broadcast entirely in production if WS_SERVER_URL is not configured
+  if (IS_PRODUCTION && !process.env.WS_SERVER_URL) {
+    console.warn('Skipping broadcast: WS_SERVER_URL not configured in production')
+    return false
+  }
+
   for (let attempt = 0; attempt <= retries; attempt++) {
     try {
       const response = await fetch(`${WS_SERVER_URL}/broadcast`, {
@@ -53,15 +59,17 @@ async function broadcastToMeeting(
   return false
 }
 
-// BUG-005 FIX: Helper to ensure transcript exists
+// BUG-005 FIX: Helper to ensure transcript exists (atomic upsert for P2002 race condition)
 async function ensureTranscript(meeting: { id: string; userId: string; title: string; transcript: { id: string } | null }) {
   if (meeting.transcript) {
     return meeting.transcript
   }
 
-  // Create transcript if it doesn't exist (handles race condition)
-  const transcript = await prisma.transcript.create({
-    data: {
+  // Use upsert to handle concurrent webhook requests (prevents P2002)
+  const transcript = await prisma.transcript.upsert({
+    where: { meetingId: meeting.id },
+    update: {}, // No update needed - just return existing
+    create: {
       userId: meeting.userId,
       title: meeting.title,
       sourceType: 'MEETING',
@@ -70,7 +78,7 @@ async function ensureTranscript(meeting: { id: string; userId: string; title: st
     },
   })
 
-  console.log('Created transcript for meeting:', meeting.id, 'transcript:', transcript.id)
+  console.log('Ensured transcript for meeting:', meeting.id, 'transcript:', transcript.id)
   return transcript
 }
 
