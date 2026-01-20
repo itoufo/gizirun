@@ -2,8 +2,7 @@
 
 import { useState, useCallback, useEffect, useRef } from 'react'
 import { useRouter } from 'next/navigation'
-import { useMutation } from '@tanstack/react-query'
-import { Mic, Square, Pause, Play, Save, AlertCircle } from 'lucide-react'
+import { Mic, Square, Pause, Play, AlertCircle, Loader2, CheckCircle } from 'lucide-react'
 import { Button } from '@/components/ui/Button'
 import { Card } from '@/components/ui/Card'
 import { Input } from '@/components/ui/Input'
@@ -35,7 +34,19 @@ export default function RecordPage() {
   const [sessionId, setSessionId] = useState<string | null>(null)
   const [topicState, setTopicState] = useState<TopicState | null>(null)
   const [facilitatorAlerts, setFacilitatorAlerts] = useState<FacilitatorAlert[]>([])
+  const [usageStats, setUsageStats] = useState<{
+    totalCost: number
+    totalCostJPY: number
+    callCount: number
+  } | null>(null)
   const sessionIdRef = useRef<string | null>(null)
+
+  // Auto-save state
+  const [transcriptId, setTranscriptId] = useState<string | null>(null)
+  const [isSaving, setIsSaving] = useState(false)
+  const [savedSegmentCount, setSavedSegmentCount] = useState(0)
+  const transcriptIdRef = useRef<string | null>(null)
+  const durationRef = useRef(0)
 
   // Refs to track latest state for callbacks
   const isConnectedRef = useRef(false)
@@ -103,6 +114,16 @@ export default function RecordPage() {
     sessionIdRef.current = sessionId
   }, [sessionId])
 
+  // Keep transcriptId ref in sync
+  useEffect(() => {
+    transcriptIdRef.current = transcriptId
+  }, [transcriptId])
+
+  // Keep duration ref in sync
+  useEffect(() => {
+    durationRef.current = duration
+  }, [duration])
+
   // Topic analysis function
   const analyzeTopicSegment = useCallback(async (segment: { speaker: string; text: string; startTime: number }) => {
     const currentSessionId = sessionIdRef.current
@@ -130,6 +151,13 @@ export default function RecordPage() {
             currentTopic: a.currentTopic || data.topicState?.currentTopic || '',
           })))
         }
+        if (data.usageStats) {
+          setUsageStats({
+            totalCost: data.usageStats.totalCost,
+            totalCostJPY: data.usageStats.totalCostJPY,
+            callCount: data.usageStats.callCount,
+          })
+        }
       }
     } catch (err) {
       console.error('Topic analysis failed:', err)
@@ -155,6 +183,65 @@ export default function RecordPage() {
     }
   }, [])
 
+  // Save segment to recording-sessions API
+  const saveSegmentToSession = useCallback(async (segment: {
+    speaker: number
+    text: string
+    startTime: number
+  }) => {
+    const currentSessionId = sessionIdRef.current
+    if (!currentSessionId) return
+
+    try {
+      setIsSaving(true)
+      const response = await fetch(`/api/recording-sessions/${currentSessionId}/segments`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          segment,
+          duration: durationRef.current,
+        }),
+      })
+
+      if (response.ok) {
+        const data = await response.json()
+        if (data.savedSegmentCount !== undefined) {
+          setSavedSegmentCount(data.savedSegmentCount)
+        }
+      }
+    } catch (err) {
+      console.error('Failed to save segment:', err)
+    } finally {
+      setIsSaving(false)
+    }
+  }, [])
+
+  // Complete recording session
+  const completeRecordingSession = useCallback(async () => {
+    const currentSessionId = sessionIdRef.current
+    const currentTranscriptId = transcriptIdRef.current
+    if (!currentSessionId) return currentTranscriptId
+
+    try {
+      const response = await fetch(`/api/recording-sessions/${currentSessionId}/complete`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          duration: durationRef.current,
+          title: title || undefined,
+        }),
+      })
+
+      if (response.ok) {
+        const data = await response.json()
+        return data.transcriptId
+      }
+    } catch (err) {
+      console.error('Failed to complete recording session:', err)
+    }
+    return currentTranscriptId
+  }, [title])
+
   const handleTranscript = useCallback((data: TranscriptMessage) => {
     if (data.isFinal && data.text.trim()) {
       // Add final segment
@@ -174,11 +261,18 @@ export default function RecordPage() {
         text: data.text,
         startTime: data.start,
       })
+
+      // Auto-save segment
+      saveSegmentToSession({
+        speaker: data.speaker,
+        text: data.text,
+        startTime: data.start,
+      })
     } else if (!data.isFinal) {
       // Update interim text
       setInterimText(data.text)
     }
-  }, [analyzeTopicSegment])
+  }, [analyzeTopicSegment, saveSegmentToSession])
 
   // Auto-scroll transcript
   useEffect(() => {
@@ -205,6 +299,20 @@ export default function RecordPage() {
     }
   }, [isRecording, isPaused])
 
+  // Warn before leaving if recording
+  useEffect(() => {
+    const handleBeforeUnload = (e: BeforeUnloadEvent) => {
+      if (isRecording) {
+        e.preventDefault()
+        e.returnValue = '録音中です。ページを離れると録音が失われる可能性があります。'
+        return e.returnValue
+      }
+    }
+
+    window.addEventListener('beforeunload', handleBeforeUnload)
+    return () => window.removeEventListener('beforeunload', handleBeforeUnload)
+  }, [isRecording])
+
   const startRecording = useCallback(async () => {
     try {
       setError(null)
@@ -213,12 +321,37 @@ export default function RecordPage() {
       setInterimText('')
       segmentIdCounter.current = 0
 
-      // Generate session ID for topic analysis
+      // Generate session ID for topic analysis and recording
       const newSessionId = `rec-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`
       setSessionId(newSessionId)
       sessionIdRef.current = newSessionId
       setTopicState(null)
       setFacilitatorAlerts([])
+      setUsageStats(null)
+      setTranscriptId(null)
+      setSavedSegmentCount(0)
+
+      // Create recording session (creates transcript in DB)
+      try {
+        const sessionResponse = await fetch('/api/recording-sessions', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            sessionId: newSessionId,
+            title: title || `録音 ${new Date().toLocaleString('ja-JP')}`,
+          }),
+        })
+
+        if (sessionResponse.ok) {
+          const sessionData = await sessionResponse.json()
+          setTranscriptId(sessionData.transcriptId)
+          transcriptIdRef.current = sessionData.transcriptId
+          console.log('Recording session created:', sessionData.transcriptId)
+        }
+      } catch (sessionErr) {
+        console.error('Failed to create recording session:', sessionErr)
+        // Continue without auto-save
+      }
 
       // Connect WebSocket first
       connect()
@@ -235,9 +368,9 @@ export default function RecordPage() {
       setError('録音の開始に失敗しました')
       console.error(err)
     }
-  }, [connect, startAudio, sendJSON])
+  }, [connect, startAudio, sendJSON, title])
 
-  const stopRecording = useCallback(() => {
+  const stopRecording = useCallback(async () => {
     // Stop audio
     stopAudio()
 
@@ -247,11 +380,19 @@ export default function RecordPage() {
     // End topic analysis session
     endTopicSession()
 
+    // Complete recording session and get transcript ID
+    const finalTranscriptId = await completeRecordingSession()
+
     // Disconnect WebSocket
     setTimeout(() => {
       disconnect()
     }, 500)
-  }, [stopAudio, sendJSON, disconnect, endTopicSession])
+
+    // Navigate to transcript page if we have a transcript
+    if (finalTranscriptId) {
+      router.push(`/transcripts/${finalTranscriptId}`)
+    }
+  }, [stopAudio, sendJSON, disconnect, endTopicSession, completeRecordingSession, router])
 
   const togglePause = useCallback(() => {
     if (isPaused) {
@@ -260,32 +401,6 @@ export default function RecordPage() {
       pauseRecording()
     }
   }, [isPaused, resumeRecording, pauseRecording])
-
-  // Save transcript
-  const saveMutation = useMutation({
-    mutationFn: async () => {
-      const fullText = segments.map((s) => s.text).join('\n')
-
-      const res = await fetch('/api/transcripts', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          title: title || `録音 ${new Date().toLocaleString('ja-JP')}`,
-          sourceType: 'RECORDING',
-          rawText: fullText,
-        }),
-      })
-
-      if (!res.ok) throw new Error('Failed to save')
-      return res.json()
-    },
-    onSuccess: (data) => {
-      router.push(`/transcripts/${data.id}`)
-    },
-    onError: () => {
-      setError('保存に失敗しました')
-    },
-  })
 
   const formatTime = (seconds: number) => {
     const mins = Math.floor(seconds / 60)
@@ -407,27 +522,35 @@ export default function RecordPage() {
         {/* Live transcript */}
         <Card className="p-6">
           <div className="flex items-center justify-between mb-4">
-            <h2 className="text-lg font-semibold text-gray-900">
-              リアルタイム文字起こし
-            </h2>
-            {segments.length > 0 && !isRecording && (
-              <div className="flex items-center gap-2">
-                <Input
-                  placeholder="タイトル（任意）"
-                  value={title}
-                  onChange={(e) => setTitle(e.target.value)}
-                  className="w-48"
-                />
-                <Button
-                  variant="primary"
-                  size="sm"
-                  onClick={() => saveMutation.mutate()}
-                  isLoading={saveMutation.isPending}
-                >
-                  <Save className="h-4 w-4 mr-2" />
-                  保存
-                </Button>
-              </div>
+            <div className="flex items-center gap-3">
+              <h2 className="text-lg font-semibold text-gray-900">
+                リアルタイム文字起こし
+              </h2>
+              {isRecording && transcriptId && (
+                <div className="flex items-center gap-1.5 text-xs text-gray-500">
+                  {isSaving ? (
+                    <>
+                      <Loader2 className="h-3 w-3 animate-spin" />
+                      <span>保存中...</span>
+                    </>
+                  ) : savedSegmentCount > 0 ? (
+                    <>
+                      <CheckCircle className="h-3 w-3 text-green-500" />
+                      <span>{savedSegmentCount}件保存済み</span>
+                    </>
+                  ) : (
+                    <span>自動保存有効</span>
+                  )}
+                </div>
+              )}
+            </div>
+            {!isRecording && (
+              <Input
+                placeholder="タイトル（任意）"
+                value={title}
+                onChange={(e) => setTitle(e.target.value)}
+                className="w-48"
+              />
             )}
           </div>
 
@@ -485,6 +608,7 @@ export default function RecordPage() {
               alerts={facilitatorAlerts}
               onAcknowledgeAlert={handleAcknowledgeAlert}
               isConnected={isRecording && isConnected}
+              usageStats={usageStats}
             />
           </div>
         </div>

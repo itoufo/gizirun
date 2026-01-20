@@ -1,6 +1,36 @@
 import { NextResponse } from 'next/server'
 import { auth } from '@/lib/auth/auth'
-import { analyzeTopics, generateFacilitatorMessage, type TopicAnalysisResult } from '@/lib/ai/topic-analyzer'
+import { analyzeTopics, generateFacilitatorMessage, compressConversation, type TopicAnalysisResult, type TokenUsage } from '@/lib/ai/topic-analyzer'
+
+// モデル別料金（USD per 1M tokens）
+const MODEL_PRICING = {
+  'gpt-5.2': { inputPer1M: 2.50, outputPer1M: 10.00 },
+  'gpt-5-mini': { inputPer1M: 0.15, outputPer1M: 0.60 },
+}
+const USD_TO_JPY = 150
+
+// コスト計算
+function calculateCost(
+  usage: TokenUsage,
+  model: 'gpt-5.2' | 'gpt-5-mini' = 'gpt-5.2'
+): number {
+  const pricing = MODEL_PRICING[model]
+  const inputCost = (usage.inputTokens / 1_000_000) * pricing.inputPer1M
+  const outputCost = (usage.outputTokens / 1_000_000) * pricing.outputPer1M
+  return inputCost + outputCost
+}
+
+// 圧縮設定
+const COMPRESSION_THRESHOLD = 20  // セグメント数閾値
+const SEGMENTS_TO_KEEP_RAW = 10   // 直近で生のまま保持する数
+
+// 使用統計
+interface UsageStats {
+  totalInputTokens: number
+  totalOutputTokens: number
+  totalCost: number  // USD
+  callCount: number
+}
 
 // 録音セッション用のトピック状態（メモリ内管理）
 interface RecordingTopicState {
@@ -23,6 +53,11 @@ interface RecordingTopicState {
     mainTopic: string | null
     timestamp: string
   }>
+  // コスト追跡
+  usageStats: UsageStats
+  // 圧縮用
+  conversationSummary: string | null
+  allProcessedSegments: Array<{ speaker: string; text: string }>
 }
 
 // セッションごとの状態を保持
@@ -80,6 +115,14 @@ export async function POST(request: Request) {
         driftScore: 0,
         analysisCount: 0,
         alerts: [],
+        usageStats: {
+          totalInputTokens: 0,
+          totalOutputTokens: 0,
+          totalCost: 0,
+          callCount: 0,
+        },
+        conversationSummary: null,
+        allProcessedSegments: [],
       }
       recordingStates.set(sessionId, state)
       console.log(`[TopicAnalysis] New session: ${sessionId}`)
@@ -87,10 +130,16 @@ export async function POST(request: Request) {
 
     // セグメントが提供された場合、追加
     if (segment) {
-      state.pendingSegments.push({
+      const segmentData = {
         speaker: segment.speaker || '話者',
         text: segment.text,
         startTime: segment.startTime || 0,
+      }
+      state.pendingSegments.push(segmentData)
+      // 圧縮用に全セグメント追跡
+      state.allProcessedSegments.push({
+        speaker: segmentData.speaker,
+        text: segmentData.text,
       })
     }
 
@@ -114,13 +163,55 @@ export async function POST(request: Request) {
       console.log(`[TopicAnalysis] Analyzing session: ${sessionId}, segments: ${state.pendingSegments.length}`)
 
       try {
+        // 圧縮チェック: セグメント数が閾値を超えたら古いものを圧縮
+        if (
+          state.allProcessedSegments.length >= COMPRESSION_THRESHOLD &&
+          state.allProcessedSegments.length > SEGMENTS_TO_KEEP_RAW
+        ) {
+          const segmentsToCompress = state.allProcessedSegments.slice(
+            0,
+            state.allProcessedSegments.length - SEGMENTS_TO_KEEP_RAW
+          )
+
+          console.log(`[TopicAnalysis] Compressing ${segmentsToCompress.length} segments`)
+
+          const compressionResult = await compressConversation({
+            segments: segmentsToCompress,
+            existingSummary: state.conversationSummary,
+          })
+
+          state.conversationSummary = compressionResult.summary
+
+          // 圧縮後は直近セグメントのみ保持
+          state.allProcessedSegments = state.allProcessedSegments.slice(-SEGMENTS_TO_KEEP_RAW)
+
+          // 圧縮コストを追跡
+          if (compressionResult.usage) {
+            const compressionCost = calculateCost(compressionResult.usage, 'gpt-5-mini')
+            state.usageStats.totalInputTokens += compressionResult.usage.inputTokens
+            state.usageStats.totalOutputTokens += compressionResult.usage.outputTokens
+            state.usageStats.totalCost += compressionCost
+            state.usageStats.callCount++
+          }
+        }
+
         analysisResult = await analyzeTopics({
           recentSegments: state.pendingSegments,
           previousTopics: state.topicHistory,
           mainTopic: state.mainTopic,
           agendaItems: [],
           isFirstAnalysis: state.analysisCount === 0,
+          conversationSummary: state.conversationSummary,
         })
+
+        // 使用統計を追跡
+        if (analysisResult.usage) {
+          const analysisCost = calculateCost(analysisResult.usage, 'gpt-5.2')
+          state.usageStats.totalInputTokens += analysisResult.usage.inputTokens
+          state.usageStats.totalOutputTokens += analysisResult.usage.outputTokens
+          state.usageStats.totalCost += analysisCost
+          state.usageStats.callCount++
+        }
 
         // 状態更新
         state.pendingSegments = []
@@ -180,6 +271,13 @@ export async function POST(request: Request) {
       newAlert,
       analysisResult,
       pendingSegments: state.pendingSegments.length,
+      usageStats: {
+        totalInputTokens: state.usageStats.totalInputTokens,
+        totalOutputTokens: state.usageStats.totalOutputTokens,
+        totalCost: state.usageStats.totalCost,
+        totalCostJPY: Math.ceil(state.usageStats.totalCost * USD_TO_JPY),
+        callCount: state.usageStats.callCount,
+      },
     })
   } catch (error) {
     console.error('Topic analysis error:', error)
