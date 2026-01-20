@@ -5,14 +5,14 @@ import { analyzeTopics, generateFacilitatorMessage, compressConversation, type T
 // モデル別料金（USD per 1M tokens）
 const MODEL_PRICING = {
   'gpt-5.2': { inputPer1M: 2.50, outputPer1M: 10.00 },
-  'gpt-5.2-mini': { inputPer1M: 0.15, outputPer1M: 0.60 },
+  'gpt-5-mini': { inputPer1M: 0.15, outputPer1M: 0.60 },
 }
 const USD_TO_JPY = 150
 
 // コスト計算
 function calculateCost(
   usage: TokenUsage,
-  model: 'gpt-5.2' | 'gpt-5.2-mini' = 'gpt-5.2'
+  model: 'gpt-5.2' | 'gpt-5-mini' = 'gpt-5.2'
 ): number {
   const pricing = MODEL_PRICING[model]
   const inputCost = (usage.inputTokens / 1_000_000) * pricing.inputPer1M
@@ -187,7 +187,7 @@ export async function POST(request: Request) {
 
           // 圧縮コストを追跡
           if (compressionResult.usage) {
-            const compressionCost = calculateCost(compressionResult.usage, 'gpt-5.2-mini')
+            const compressionCost = calculateCost(compressionResult.usage, 'gpt-5-mini')
             state.usageStats.totalInputTokens += compressionResult.usage.inputTokens
             state.usageStats.totalOutputTokens += compressionResult.usage.outputTokens
             state.usageStats.totalCost += compressionCost

@@ -93,7 +93,26 @@ ${segmentsText}
       { role: 'system', content: systemPrompt },
       { role: 'user', content: userPrompt },
     ],
-    response_format: { type: 'json_object' },
+    response_format: {
+      type: 'json_schema',
+      json_schema: {
+        name: 'topic_analysis',
+        schema: {
+          type: 'object',
+          additionalProperties: false,
+          properties: {
+            mainTopic: { type: ['string', 'null'] },
+            currentTopic: { type: 'string' },
+            driftScore: { type: 'number' },
+            driftReason: { type: ['string', 'null'] },
+            suggestedAction: { type: ['string', 'null'] },
+          },
+          required: ['mainTopic', 'currentTopic', 'driftScore', 'driftReason', 'suggestedAction'],
+        },
+        strict: true,
+      },
+    },
+    reasoning_effort: 'low',
     temperature: 0.3,
   })
 
@@ -177,7 +196,7 @@ ${segmentsText}
 上記を要約してください。`
 
   const response = await openai.chat.completions.create({
-    model: 'gpt-5.2-mini', // コスト効率のため
+    model: 'gpt-5-mini', // コスト効率のため
     messages: [
       { role: 'system', content: systemPrompt },
       { role: 'user', content: userPrompt },
