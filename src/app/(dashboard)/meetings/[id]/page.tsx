@@ -18,6 +18,7 @@ import { Button } from '@/components/ui/Button'
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/Card'
 import { Badge } from '@/components/ui/Badge'
 import { Skeleton } from '@/components/ui/Skeleton'
+import { FacilitatorPanel, type FacilitatorAlert, type TopicState } from '@/components/meeting/FacilitatorPanel'
 import { cn } from '@/lib/utils/cn'
 import type { Meeting, BotStatus, MeetingStatus } from '@/types/transcript'
 
@@ -64,6 +65,10 @@ export default function MeetingDetailPage() {
   const [wsConnected, setWsConnected] = useState(false)
   const transcriptContainerRef = useRef<HTMLDivElement>(null)
   const wsRef = useRef<WebSocket | null>(null)
+
+  // AIファシリテーター用の状態
+  const [topicState, setTopicState] = useState<TopicState | null>(null)
+  const [facilitatorAlerts, setFacilitatorAlerts] = useState<FacilitatorAlert[]>([])
 
   const { data: meeting, isLoading, error } = useQuery({
     queryKey: ['meeting', params.id],
@@ -144,6 +149,17 @@ export default function MeetingDetailPage() {
             },
           ])
           setInterimText(null)
+        } else if (data.type === 'topic.update') {
+          // トピック更新
+          setTopicState({
+            mainTopic: data.mainTopic || null,
+            currentTopic: data.currentTopic || null,
+            driftScore: data.driftScore || 0,
+          })
+        } else if (data.type === 'facilitator.alert') {
+          // ファシリテーターアラート
+          const alert = data.alert as FacilitatorAlert
+          setFacilitatorAlerts((prev) => [alert, ...prev])
         } else if (data.type === 'subscribed') {
           console.log('Subscribed to meeting:', data.meetingId)
         }
@@ -176,6 +192,20 @@ export default function MeetingDetailPage() {
       transcriptContainerRef.current.scrollTop = transcriptContainerRef.current.scrollHeight
     }
   }, [realtimeSegments, interimText])
+
+  // アラート承認ハンドラ
+  const handleAcknowledgeAlert = useCallback(async (alertId: string) => {
+    try {
+      await fetch(`/api/meetings/${params.id}/alerts/${alertId}/ack`, {
+        method: 'POST',
+      })
+      setFacilitatorAlerts((prev) =>
+        prev.map((a) => (a.id === alertId ? { ...a, acknowledged: true } : a))
+      )
+    } catch (error) {
+      console.error('Failed to acknowledge alert:', error)
+    }
+  }, [params.id])
 
   const getBotStatusBadge = (botStatus?: BotStatus | null, status?: MeetingStatus) => {
     if (botStatus === 'ACTIVE') {
@@ -306,9 +336,18 @@ export default function MeetingDetailPage() {
         </Card>
       )}
 
-      <div className="grid gap-6 lg:grid-cols-3">
+      <div className={cn(
+        "grid gap-6",
+        meeting.botStatus === 'ACTIVE' || meeting.botStatus === 'JOINING'
+          ? "lg:grid-cols-4"
+          : "lg:grid-cols-3"
+      )}>
         {/* Transcript */}
-        <Card className="lg:col-span-2">
+        <Card className={cn(
+          meeting.botStatus === 'ACTIVE' || meeting.botStatus === 'JOINING'
+            ? "lg:col-span-2"
+            : "lg:col-span-2"
+        )}>
           <CardHeader className="flex flex-row items-center justify-between">
             <CardTitle>文字起こし</CardTitle>
             {wsConnected && (
@@ -462,6 +501,16 @@ export default function MeetingDetailPage() {
             )}
           </CardContent>
         </Card>
+
+        {/* AI Facilitator Panel - only show during active meeting */}
+        {(meeting.botStatus === 'ACTIVE' || meeting.botStatus === 'JOINING') && (
+          <FacilitatorPanel
+            topicState={topicState}
+            alerts={facilitatorAlerts}
+            onAcknowledgeAlert={handleAcknowledgeAlert}
+            isConnected={wsConnected}
+          />
+        )}
       </div>
     </div>
   )

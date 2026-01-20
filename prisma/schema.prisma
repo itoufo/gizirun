@@ -119,8 +119,11 @@ model Meeting {
   botStatus       BotStatus?
   botInstanceId   String?
   errorMessage    String?
+  agendaItems     String[]      @default([])
 
-  transcript Transcript?
+  transcript        Transcript?
+  topics            MeetingTopic[]
+  facilitatorAlerts FacilitatorAlert[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -128,6 +131,39 @@ model Meeting {
   @@index([userId])
   @@index([status])
   @@index([scheduledStart])
+  @@schema("notta")
+}
+
+model MeetingTopic {
+  id          String   @id @default(cuid())
+  meetingId   String
+  meeting     Meeting  @relation(fields: [meetingId], references: [id], onDelete: Cascade)
+  topic       String
+  isMainTopic Boolean  @default(false)
+  confidence  Float
+  startTime   Float
+  endTime     Float?
+
+  createdAt DateTime @default(now())
+
+  @@index([meetingId])
+  @@schema("notta")
+}
+
+model FacilitatorAlert {
+  id           String    @id @default(cuid())
+  meetingId    String
+  meeting      Meeting   @relation(fields: [meetingId], references: [id], onDelete: Cascade)
+  alertType    AlertType
+  message      String
+  driftScore   Float?
+  fromTopic    String?
+  toTopic      String?
+  acknowledged Boolean   @default(false)
+
+  createdAt DateTime @default(now())
+
+  @@index([meetingId])
   @@schema("notta")
 }
 
@@ -200,6 +236,14 @@ enum BotStatus {
 enum CalendarProvider {
   GOOGLE
   OUTLOOK
+
+  @@schema("notta")
+}
+
+enum AlertType {
+  TOPIC_DRIFT
+  RETURNING
+  NEW_TOPIC
 
   @@schema("notta")
 }

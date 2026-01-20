@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 import { prisma } from '@/lib/db/prisma'
 import { verifyWebhookSignature, type WebhookEvent } from '@/lib/meeting-bot/client'
+import { topicOrchestrator } from '@/lib/meeting/topic-orchestrator'
 
 // BUG-002 FIX: Warn if WS_SERVER_URL is not configured in production
 const WS_SERVER_URL = process.env.WS_SERVER_URL || 'http://localhost:3001'
@@ -164,6 +165,9 @@ export async function POST(request: Request) {
             data: { status: 'COMPLETED' },
           })
         }
+
+        // トピックオーケストレーターをクリーンアップ
+        await topicOrchestrator.endMeeting(meeting.id)
         break
 
       case 'bot.error':
@@ -234,6 +238,13 @@ export async function POST(request: Request) {
               startTime: segment.startTime,
               endTime: segment.endTime,
             },
+          })
+
+          // トピック分析オーケストレーターにセグメントを追加
+          await topicOrchestrator.addSegment(meeting.id, {
+            speaker: segment.speaker,
+            text: segment.text,
+            startTime: segment.startTime,
           })
         }
         break
