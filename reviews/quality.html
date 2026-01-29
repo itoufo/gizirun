@@ -1,0 +1,230 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>コード品質レビュー - Notta レビュー</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Hiragino Sans', sans-serif; background: #f8fafc; color: #1e293b; line-height: 1.7; }
+    .header { background: linear-gradient(135deg, #0f172a 0%, #1e293b 100%); color: #fff; padding: 2.5rem 2rem; }
+    .header h1 { font-size: 1.75rem; font-weight: 700; letter-spacing: 0.02em; }
+    .header .meta { font-size: 0.875rem; color: #94a3b8; margin-top: 0.5rem; }
+    .container { max-width: 960px; margin: 0 auto; padding: 2rem 1.5rem; }
+    .grade-section { display: flex; align-items: center; gap: 2rem; margin-bottom: 2.5rem; padding: 1.5rem; background: #fff; border-radius: 12px; box-shadow: 0 1px 3px rgba(0,0,0,0.08); }
+    .grade-badge { width: 88px; height: 88px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 2.25rem; font-weight: 800; color: #fff; flex-shrink: 0; box-shadow: 0 4px 12px rgba(0,0,0,0.15); }
+    .grade-A { background: linear-gradient(135deg, #22c55e, #16a34a); }
+    .grade-B { background: linear-gradient(135deg, #3b82f6, #2563eb); }
+    .grade-C { background: linear-gradient(135deg, #eab308, #ca8a04); }
+    .grade-D { background: linear-gradient(135deg, #f97316, #ea580c); }
+    .grade-F { background: linear-gradient(135deg, #ef4444, #dc2626); }
+    .grade-text h2 { font-size: 1.125rem; font-weight: 600; margin-bottom: 0.5rem; }
+    .grade-text p { color: #475569; font-size: 0.9375rem; }
+    .section-title { font-size: 1.25rem; font-weight: 700; margin-bottom: 1rem; padding-bottom: 0.5rem; border-bottom: 2px solid #e2e8f0; }
+    .findings-table { width: 100%; border-collapse: separate; border-spacing: 0; margin-bottom: 2.5rem; border-radius: 8px; overflow: hidden; box-shadow: 0 1px 3px rgba(0,0,0,0.08); }
+    .findings-table th { background: #1e293b; color: #fff; padding: 0.875rem 1rem; text-align: left; font-size: 0.8125rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; }
+    .findings-table td { padding: 0.875rem 1rem; border-bottom: 1px solid #e2e8f0; font-size: 0.875rem; vertical-align: top; background: #fff; }
+    .findings-table tr:last-child td { border-bottom: none; }
+    .findings-table tr:hover td { background: #f8fafc; }
+    .severity { display: inline-block; padding: 0.1875rem 0.625rem; border-radius: 9999px; font-size: 0.75rem; font-weight: 700; color: #fff; letter-spacing: 0.025em; }
+    .severity-critical { background: #dc2626; }
+    .severity-high { background: #ea580c; }
+    .severity-medium { background: #ca8a04; }
+    .severity-low { background: #65a30d; }
+    .file-path { font-family: 'SF Mono', 'Fira Code', Consolas, monospace; font-size: 0.8rem; color: #6366f1; word-break: break-all; }
+    .roadmap { margin-bottom: 2rem; }
+    .roadmap-item { background: #fff; border: 1px solid #e2e8f0; border-radius: 10px; padding: 1.25rem 1.5rem; margin-bottom: 0.75rem; display: flex; gap: 1rem; align-items: flex-start; box-shadow: 0 1px 2px rgba(0,0,0,0.04); }
+    .roadmap-number { width: 32px; height: 32px; background: linear-gradient(135deg, #3b82f6, #2563eb); color: #fff; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-weight: 700; font-size: 0.875rem; flex-shrink: 0; }
+    .roadmap-content strong { display: block; margin-bottom: 0.25rem; }
+    .roadmap-content p { color: #64748b; font-size: 0.875rem; margin: 0; }
+    .stats-bar { display: flex; gap: 1rem; margin-bottom: 2.5rem; flex-wrap: wrap; }
+    .stat-card { background: #fff; border: 1px solid #e2e8f0; border-radius: 8px; padding: 1rem 1.25rem; flex: 1; min-width: 120px; text-align: center; }
+    .stat-card .stat-value { font-size: 1.5rem; font-weight: 800; }
+    .stat-card .stat-label { font-size: 0.75rem; color: #64748b; margin-top: 0.25rem; }
+    .stat-critical { color: #dc2626; }
+    .stat-high { color: #ea580c; }
+    .stat-medium { color: #ca8a04; }
+    .stat-low { color: #65a30d; }
+    .footer { text-align: center; color: #94a3b8; font-size: 0.75rem; padding: 2rem 0; border-top: 1px solid #e2e8f0; margin-top: 2rem; }
+    .back-link { display: inline-block; margin-bottom: 1.5rem; color: #3b82f6; text-decoration: none; font-size: 0.875rem; font-weight: 500; }
+    .back-link:hover { text-decoration: underline; }
+  </style>
+</head>
+<body>
+  <div class="header">
+    <h1>コード品質レビュー</h1>
+    <div class="meta">Notta | 2026-01-29</div>
+  </div>
+  <div class="container">
+    <a href="index.html" class="back-link">&larr; ダッシュボードに戻る</a>
+
+    <div class="grade-section">
+      <div class="grade-badge grade-B">B</div>
+      <div class="grade-text">
+        <h2>総合評価</h2>
+        <p>TypeScript strictモードが有効で、パスエイリアス（@/）が一貫して使用されている。Zodによるバリデーションスキーマが主要エンドポイントに導入済み。命名規則はNext.js/Reactの慣例に概ね準拠。ただし、一部のファイルで<code>as unknown as</code>によるunsafeなキャストが多用されており、APIルート間のエラーハンドリングパターンに不統一がある。型定義（types/）は最小限でPrisma生成型との整合性が曖昧な箇所がある。</p>
+      </div>
+    </div>
+
+    <div class="stats-bar">
+      <div class="stat-card">
+        <div class="stat-value stat-critical">0</div>
+        <div class="stat-label">Critical</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-value stat-high">2</div>
+        <div class="stat-label">High</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-value stat-medium">6</div>
+        <div class="stat-label">Medium</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-value stat-low">4</div>
+        <div class="stat-label">Low</div>
+      </div>
+    </div>
+
+    <h2 class="section-title">検出事項</h2>
+    <table class="findings-table">
+      <thead>
+        <tr>
+          <th>カテゴリ</th>
+          <th>ファイル</th>
+          <th>重要度</th>
+          <th>説明</th>
+          <th>推奨対応</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>型安全性</td>
+          <td class="file-path">src/app/api/topic-analysis/segment/route.ts:66,90,118-128</td>
+          <td><span class="severity severity-high">HIGH</span></td>
+          <td><code>as unknown as</code>によるダブルキャストが多数使用されている。Prisma JsonValueとアプリケーション型の間の変換で型安全性が失われている。</td>
+          <td>Prisma JsonValueを安全にパースするヘルパー関数（ランタイム検証付き）を作成する。ZodスキーマでJSON値をパースすることで型安全性を確保。</td>
+        </tr>
+        <tr>
+          <td>エラーハンドリング</td>
+          <td class="file-path">src/app/api/**/route.ts</td>
+          <td><span class="severity severity-high">HIGH</span></td>
+          <td>APIルート間でエラーハンドリングパターンが不統一。一部はtry/catchで500を返し、一部はエラー詳細を含む。エラーレスポンス形式（{ error: string }）は概ね統一されているが、catchブロックの処理にばらつきがある。</td>
+          <td>共通のエラーハンドリングユーティリティ（handleApiError等）を作成し、全ルートで統一使用する。</td>
+        </tr>
+        <tr>
+          <td>DRY原則</td>
+          <td class="file-path">src/app/api/**/route.ts</td>
+          <td><span class="severity severity-medium">MEDIUM</span></td>
+          <td>認証チェック（<code>const session = await auth(); if (!session?.user?.id)</code>）が全APIルートで重複。15箇所以上で同一パターン。</td>
+          <td>認証チェックを共通ユーティリティまたはミドルウェア関数に抽出する。withAuth(handler)のようなHOFパターンを検討。</td>
+        </tr>
+        <tr>
+          <td>DRY原則</td>
+          <td class="file-path">src/app/api/transcripts/[id]/route.ts:20-30, src/app/api/meetings/[id]/route.ts:20-30</td>
+          <td><span class="severity severity-medium">MEDIUM</span></td>
+          <td>所有権チェック（findUnique + userId一致確認 + 404/403レスポンス）が個別ルートで重複。</td>
+          <td>リソース所有権チェックを共通ユーティリティに抽出する。</td>
+        </tr>
+        <tr>
+          <td>保守性</td>
+          <td class="file-path">src/app/api/topic-analysis/segment/route.ts:133-320</td>
+          <td><span class="severity severity-medium">MEDIUM</span></td>
+          <td>POST関数が187行。複数のネストされたif文と深いインデント（最大5レベル）で可読性が低い。</td>
+          <td>早期リターンパターンを適用し、分析ロジック・圧縮ロジック・アラート生成を別関数に分割する。</td>
+        </tr>
+        <tr>
+          <td>TypeScript活用</td>
+          <td class="file-path">src/app/api/webhooks/meeting-bot/route.ts:30-50</td>
+          <td><span class="severity severity-medium">MEDIUM</span></td>
+          <td>Webhookペイロードの型定義がany/unknown。イベント種別に応じた型のnarrowingが不十分。</td>
+          <td>Webhookイベントのdiscriminated unionを定義し、イベント種別ごとに適切な型を適用する。</td>
+        </tr>
+        <tr>
+          <td>命名規則</td>
+          <td class="file-path">src/lib/meeting/topic-orchestrator.ts:1-130</td>
+          <td><span class="severity severity-medium">MEDIUM</span></td>
+          <td>クラス名TopicOrchestratorとファイルの実態（インメモリ状態管理+分析トリガー）が乖離。「Orchestrator」は大袈裟な名前。</td>
+          <td>責務に合った名前（TopicAnalysisManager等）にリネームするか、実際にオーケストレーション機能を持たせる。</td>
+        </tr>
+        <tr>
+          <td>DRY原則</td>
+          <td class="file-path">src/app/api/topic-analysis/segment/route.ts:7-22, src/lib/ai/topic-analyzer.ts</td>
+          <td><span class="severity severity-medium">MEDIUM</span></td>
+          <td>モデル料金定数とコスト計算関数がAPIルートファイルにインライン定義。複数箇所で使用する可能性があるが、再利用できない位置にある。</td>
+          <td>コスト計算ロジックをlib/ai/cost-calculator.ts等に抽出する。</td>
+        </tr>
+        <tr>
+          <td>インポート整理</td>
+          <td class="file-path">src/lib/meeting-bot/client.ts:47</td>
+          <td><span class="severity severity-low">LOW</span></td>
+          <td>ESMプロジェクト内で<code>require('crypto')</code>を使用。他ファイルはESM import統一。</td>
+          <td><code>import crypto from 'crypto'</code>に統一する。</td>
+        </tr>
+        <tr>
+          <td>命名規則</td>
+          <td class="file-path">src/app/api/topic-analysis/segment/route.ts:29-46</td>
+          <td><span class="severity severity-low">LOW</span></td>
+          <td>ローカルinterface（UsageStats, Alert）がAPIルートファイル内に定義されており再利用不可。</td>
+          <td>types/ディレクトリに移動し、関連する型定義と統合する。</td>
+        </tr>
+        <tr>
+          <td>保守性</td>
+          <td class="file-path">src/app/(dashboard)/meetings/[id]/page.tsx:1-300</td>
+          <td><span class="severity severity-low">LOW</span></td>
+          <td>ミーティング詳細ページが約300行。表示とデータ取得のロジックが混在。</td>
+          <td>データ取得をカスタムフックに分離し、表示コンポーネントを小さく保つ。</td>
+        </tr>
+        <tr>
+          <td>型安全性</td>
+          <td class="file-path">src/types/transcript.ts:1-60</td>
+          <td><span class="severity severity-low">LOW</span></td>
+          <td>独自型定義がPrismaの生成型と重複する部分がある。型の一元管理が不明確。</td>
+          <td>Prisma生成型を基本とし、フロントエンド固有の変換型のみtypes/に定義する方針を明確化。</td>
+        </tr>
+      </tbody>
+    </table>
+
+    <h2 class="section-title">改善ロードマップ</h2>
+    <div class="roadmap">
+      <div class="roadmap-item">
+        <div class="roadmap-number">1</div>
+        <div class="roadmap-content">
+          <strong>共通APIユーティリティの整備</strong>
+          <p>認証チェック、所有権検証、エラーハンドリングを共通化。withAuth(handler)のようなHOFパターンで全ルートの重複を解消し、一貫したエラーレスポンス形式を確保する。</p>
+        </div>
+      </div>
+      <div class="roadmap-item">
+        <div class="roadmap-number">2</div>
+        <div class="roadmap-content">
+          <strong>Prisma JsonValue の型安全パーサー導入</strong>
+          <p><code>as unknown as</code>を排除し、Zodスキーマによるランタイム検証付きパーサーを導入。JSON型カラムの読み書き時に型安全性を確保する。</p>
+        </div>
+      </div>
+      <div class="roadmap-item">
+        <div class="roadmap-number">3</div>
+        <div class="roadmap-content">
+          <strong>大型関数・ファイルの分割</strong>
+          <p>topic-analysis/segment/route.tsのPOST関数（187行）を分析・圧縮・アラート生成の各関数に分割。record/page.tsx等の大型コンポーネントもサブコンポーネント化。</p>
+        </div>
+      </div>
+      <div class="roadmap-item">
+        <div class="roadmap-number">4</div>
+        <div class="roadmap-content">
+          <strong>Webhook型定義の強化</strong>
+          <p>Meeting BaaS Webhookイベントのdiscriminated union型を定義し、イベント種別ごとの型安全なハンドリングを実現する。</p>
+        </div>
+      </div>
+      <div class="roadmap-item">
+        <div class="roadmap-number">5</div>
+        <div class="roadmap-content">
+          <strong>型定義の一元管理方針策定</strong>
+          <p>Prisma生成型とフロントエンド型の関係を明確化。types/ディレクトリにフロントエンド固有の変換型のみ配置する方針を文書化。</p>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div class="footer">
+    Generated by Claude Code Project Review | 2026-01-29T00:00:00Z
+  </div>
+</body>
+</html>

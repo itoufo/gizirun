@@ -1,0 +1,223 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>セキュリティレビュー - Notta レビュー</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Hiragino Sans', sans-serif; background: #f8fafc; color: #1e293b; line-height: 1.7; }
+    .header { background: linear-gradient(135deg, #0f172a 0%, #1e293b 100%); color: #fff; padding: 2.5rem 2rem; }
+    .header h1 { font-size: 1.75rem; font-weight: 700; letter-spacing: 0.02em; }
+    .header .meta { font-size: 0.875rem; color: #94a3b8; margin-top: 0.5rem; }
+    .container { max-width: 960px; margin: 0 auto; padding: 2rem 1.5rem; }
+    .grade-section { display: flex; align-items: center; gap: 2rem; margin-bottom: 2.5rem; padding: 1.5rem; background: #fff; border-radius: 12px; box-shadow: 0 1px 3px rgba(0,0,0,0.08); }
+    .grade-badge { width: 88px; height: 88px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 2.25rem; font-weight: 800; color: #fff; flex-shrink: 0; box-shadow: 0 4px 12px rgba(0,0,0,0.15); }
+    .grade-A { background: linear-gradient(135deg, #22c55e, #16a34a); }
+    .grade-B { background: linear-gradient(135deg, #3b82f6, #2563eb); }
+    .grade-C { background: linear-gradient(135deg, #eab308, #ca8a04); }
+    .grade-D { background: linear-gradient(135deg, #f97316, #ea580c); }
+    .grade-F { background: linear-gradient(135deg, #ef4444, #dc2626); }
+    .grade-text h2 { font-size: 1.125rem; font-weight: 600; margin-bottom: 0.5rem; }
+    .grade-text p { color: #475569; font-size: 0.9375rem; }
+    .section-title { font-size: 1.25rem; font-weight: 700; margin-bottom: 1rem; padding-bottom: 0.5rem; border-bottom: 2px solid #e2e8f0; }
+    .findings-table { width: 100%; border-collapse: separate; border-spacing: 0; margin-bottom: 2.5rem; border-radius: 8px; overflow: hidden; box-shadow: 0 1px 3px rgba(0,0,0,0.08); }
+    .findings-table th { background: #1e293b; color: #fff; padding: 0.875rem 1rem; text-align: left; font-size: 0.8125rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; }
+    .findings-table td { padding: 0.875rem 1rem; border-bottom: 1px solid #e2e8f0; font-size: 0.875rem; vertical-align: top; background: #fff; }
+    .findings-table tr:last-child td { border-bottom: none; }
+    .findings-table tr:hover td { background: #f8fafc; }
+    .severity { display: inline-block; padding: 0.1875rem 0.625rem; border-radius: 9999px; font-size: 0.75rem; font-weight: 700; color: #fff; letter-spacing: 0.025em; }
+    .severity-critical { background: #dc2626; }
+    .severity-high { background: #ea580c; }
+    .severity-medium { background: #ca8a04; }
+    .severity-low { background: #65a30d; }
+    .file-path { font-family: 'SF Mono', 'Fira Code', Consolas, monospace; font-size: 0.8rem; color: #6366f1; word-break: break-all; }
+    .roadmap { margin-bottom: 2rem; }
+    .roadmap-item { background: #fff; border: 1px solid #e2e8f0; border-radius: 10px; padding: 1.25rem 1.5rem; margin-bottom: 0.75rem; display: flex; gap: 1rem; align-items: flex-start; box-shadow: 0 1px 2px rgba(0,0,0,0.04); }
+    .roadmap-number { width: 32px; height: 32px; background: linear-gradient(135deg, #3b82f6, #2563eb); color: #fff; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-weight: 700; font-size: 0.875rem; flex-shrink: 0; }
+    .roadmap-content strong { display: block; margin-bottom: 0.25rem; }
+    .roadmap-content p { color: #64748b; font-size: 0.875rem; margin: 0; }
+    .stats-bar { display: flex; gap: 1rem; margin-bottom: 2.5rem; flex-wrap: wrap; }
+    .stat-card { background: #fff; border: 1px solid #e2e8f0; border-radius: 8px; padding: 1rem 1.25rem; flex: 1; min-width: 120px; text-align: center; }
+    .stat-card .stat-value { font-size: 1.5rem; font-weight: 800; }
+    .stat-card .stat-label { font-size: 0.75rem; color: #64748b; margin-top: 0.25rem; }
+    .stat-critical { color: #dc2626; }
+    .stat-high { color: #ea580c; }
+    .stat-medium { color: #ca8a04; }
+    .stat-low { color: #65a30d; }
+    .footer { text-align: center; color: #94a3b8; font-size: 0.75rem; padding: 2rem 0; border-top: 1px solid #e2e8f0; margin-top: 2rem; }
+    .back-link { display: inline-block; margin-bottom: 1.5rem; color: #3b82f6; text-decoration: none; font-size: 0.875rem; font-weight: 500; }
+    .back-link:hover { text-decoration: underline; }
+  </style>
+</head>
+<body>
+  <div class="header">
+    <h1>セキュリティレビュー</h1>
+    <div class="meta">Notta | 2026-01-29</div>
+  </div>
+  <div class="container">
+    <a href="index.html" class="back-link">&larr; ダッシュボードに戻る</a>
+
+    <div class="grade-section">
+      <div class="grade-badge grade-C">C</div>
+      <div class="grade-text">
+        <h2>総合評価</h2>
+        <p>認証はSupabase Authにより全保護ルートで実施されているが、一部APIルートで入力バリデーションが欠落している。Webhook署名検証は実装済みだが、レート制限が全APIに未実装。WebSocketサーバーのCORSは環境変数ベースだが、フォールバックが広すぎる。recording-sessionsのエンドポイント群でsessionIdの所有権検証が不十分な箇所がある。</p>
+      </div>
+    </div>
+
+    <div class="stats-bar">
+      <div class="stat-card">
+        <div class="stat-value stat-critical">1</div>
+        <div class="stat-label">Critical</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-value stat-high">4</div>
+        <div class="stat-label">High</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-value stat-medium">4</div>
+        <div class="stat-label">Medium</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-value stat-low">2</div>
+        <div class="stat-label">Low</div>
+      </div>
+    </div>
+
+    <h2 class="section-title">検出事項</h2>
+    <table class="findings-table">
+      <thead>
+        <tr>
+          <th>カテゴリ</th>
+          <th>ファイル</th>
+          <th>重要度</th>
+          <th>説明</th>
+          <th>推奨対応</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>認可</td>
+          <td class="file-path">src/app/api/recording-sessions/[sessionId]/segments/route.ts:15-20</td>
+          <td><span class="severity severity-critical">CRITICAL</span></td>
+          <td>セグメント追加時にsessionIdの所有権検証が不十分。認証済みユーザーであれば、他ユーザーのセッションにセグメントを追加できる可能性がある。Transcriptの所有者チェック（userId一致）がない。</td>
+          <td>セグメント追加前にTranscript→userId一致を検証するクエリを追加する。<code>prisma.transcript.findFirst({ where: { id: sessionId, userId } })</code></td>
+        </tr>
+        <tr>
+          <td>入力バリデーション</td>
+          <td class="file-path">src/app/api/transcripts/[id]/route.ts:55-70</td>
+          <td><span class="severity severity-high">HIGH</span></td>
+          <td>PUTエンドポイントで入力バリデーション（Zodスキーマ）が未使用。request bodyが検証なしでPrisma updateに渡される。</td>
+          <td>既存のupdateTranscriptSchemaを使用してbodyを検証する。</td>
+        </tr>
+        <tr>
+          <td>入力バリデーション</td>
+          <td class="file-path">src/app/api/topic-analysis/segment/route.ts:140-145</td>
+          <td><span class="severity severity-high">HIGH</span></td>
+          <td>segmentオブジェクトのバリデーションが不十分。text, speaker, startTimeの型チェックがない。悪意あるデータがAI分析に渡される。</td>
+          <td>Zodスキーマでsegmentの構造を検証する。textの最大長制限も追加。</td>
+        </tr>
+        <tr>
+          <td>認可</td>
+          <td class="file-path">src/app/api/recording-sessions/[sessionId]/complete/route.ts:10-15</td>
+          <td><span class="severity severity-high">HIGH</span></td>
+          <td>録音完了エンドポイントでもsessionIdの所有権検証なし。他ユーザーのセッションを完了させることが可能。</td>
+          <td>segmentsルートと同様に、Transcriptの所有権チェックを追加する。</td>
+        </tr>
+        <tr>
+          <td>API保護</td>
+          <td class="file-path">src/app/api/**/*</td>
+          <td><span class="severity severity-high">HIGH</span></td>
+          <td>全APIルートにレート制限が未実装。AI分析エンドポイントは特にコスト面のリスクが高い（1リクエストごとにOpenAI APIコールが発生）。</td>
+          <td>Next.jsミドルウェアまたはUpstash Ratelimitでレート制限を導入する。AI関連エンドポイントは特に厳しい制限を設定。</td>
+        </tr>
+        <tr>
+          <td>CORS</td>
+          <td class="file-path">server/websocket.ts:30-35</td>
+          <td><span class="severity severity-medium">MEDIUM</span></td>
+          <td>CORS設定でCORS_ORIGINが未設定の場合、フォールバックとして広いオリジンを許可する可能性。開発環境と本番環境の分離が不明確。</td>
+          <td>本番環境では必ずCORS_ORIGINを設定し、フォールバックは開発環境のみに限定する。</td>
+        </tr>
+        <tr>
+          <td>シークレット管理</td>
+          <td class="file-path">src/app/api/topic-analysis/segment/route.ts:7-11</td>
+          <td><span class="severity severity-medium">MEDIUM</span></td>
+          <td>モデル料金やUSD/JPYレートがソースコードにハードコード。機密情報ではないが、設定の一元管理が望ましい。</td>
+          <td>環境変数または設定ファイルに外出し。</td>
+        </tr>
+        <tr>
+          <td>エラー情報露出</td>
+          <td class="file-path">src/app/api/upload/process/route.ts:45-50</td>
+          <td><span class="severity severity-medium">MEDIUM</span></td>
+          <td>一部のcatchブロックでエラーオブジェクトの詳細がレスポンスに含まれる可能性。内部エラー情報がクライアントに露出するリスク。</td>
+          <td>全APIルートで統一的なエラーレスポンス形式を使用し、詳細はサーバーサイドログに留める。</td>
+        </tr>
+        <tr>
+          <td>入力バリデーション</td>
+          <td class="file-path">src/app/api/upload/presigned/route.ts:20-30</td>
+          <td><span class="severity severity-medium">MEDIUM</span></td>
+          <td>ファイルサイズ上限（500MB）とMIMEタイプ検証はあるが、ファイル名のサニタイズが不十分。パストラバーサルのリスクは低いがベストプラクティスとして。</td>
+          <td>ファイル名からパスコンポーネント・特殊文字を除去するサニタイズ処理を追加。</td>
+        </tr>
+        <tr>
+          <td>Webhook</td>
+          <td class="file-path">src/app/api/webhooks/meeting-bot/route.ts:20-30</td>
+          <td><span class="severity severity-low">LOW</span></td>
+          <td>Webhook署名検証は実装済みで良好。ただしタイムスタンプベースのリプレイ攻撃防止は未確認。</td>
+          <td>Webhookペイロードにタイムスタンプが含まれる場合、一定時間以上経過したリクエストを拒否する。</td>
+        </tr>
+        <tr>
+          <td>セッション管理</td>
+          <td class="file-path">src/lib/supabase/middleware.ts:15-30</td>
+          <td><span class="severity severity-low">LOW</span></td>
+          <td>Supabase Auth SSRによるセッション管理は適切に実装されている。保護ルートの定義も明確。</td>
+          <td>現状維持。新しいルート追加時に保護対象に含めることを忘れないよう注意。</td>
+        </tr>
+      </tbody>
+    </table>
+
+    <h2 class="section-title">改善ロードマップ</h2>
+    <div class="roadmap">
+      <div class="roadmap-item">
+        <div class="roadmap-number">1</div>
+        <div class="roadmap-content">
+          <strong>recording-sessionsの所有権検証追加</strong>
+          <p>segments, completeエンドポイントでTranscriptのuserIdとリクエストユーザーの一致を検証する。IDOR（Insecure Direct Object Reference）脆弱性の解消。</p>
+        </div>
+      </div>
+      <div class="roadmap-item">
+        <div class="roadmap-number">2</div>
+        <div class="roadmap-content">
+          <strong>全APIルートの入力バリデーション統一</strong>
+          <p>PUT transcripts、topic-analysis segment等の未検証エンドポイントにZodスキーマを適用。共通のバリデーションユーティリティを作成し一貫性を確保。</p>
+        </div>
+      </div>
+      <div class="roadmap-item">
+        <div class="roadmap-number">3</div>
+        <div class="roadmap-content">
+          <strong>レート制限の導入</strong>
+          <p>Upstash RatelimitまたはNext.jsミドルウェアで全APIにレート制限を追加。AI関連エンドポイントはユーザー単位で厳格な制限（例：1分10リクエスト）を設定。</p>
+        </div>
+      </div>
+      <div class="roadmap-item">
+        <div class="roadmap-number">4</div>
+        <div class="roadmap-content">
+          <strong>エラーレスポンスの統一と情報露出防止</strong>
+          <p>全APIルートで統一的なエラーレスポンス形式を導入。内部エラー詳細はサーバーログに留め、クライアントにはジェネリックなメッセージのみ返す。</p>
+        </div>
+      </div>
+      <div class="roadmap-item">
+        <div class="roadmap-number">5</div>
+        <div class="roadmap-content">
+          <strong>WebSocket CORS設定の厳格化</strong>
+          <p>本番環境のCORS設定を明示的に定義し、フォールバック値を排除。環境変数の必須化。</p>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div class="footer">
+    Generated by Claude Code Project Review | 2026-01-29T00:00:00Z
+  </div>
+</body>
+</html>

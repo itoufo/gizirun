@@ -1,0 +1,216 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>テスト・可観測性レビュー - Notta レビュー</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Hiragino Sans', sans-serif; background: #f8fafc; color: #1e293b; line-height: 1.7; }
+    .header { background: linear-gradient(135deg, #0f172a 0%, #1e293b 100%); color: #fff; padding: 2.5rem 2rem; }
+    .header h1 { font-size: 1.75rem; font-weight: 700; letter-spacing: 0.02em; }
+    .header .meta { font-size: 0.875rem; color: #94a3b8; margin-top: 0.5rem; }
+    .container { max-width: 960px; margin: 0 auto; padding: 2rem 1.5rem; }
+    .grade-section { display: flex; align-items: center; gap: 2rem; margin-bottom: 2.5rem; padding: 1.5rem; background: #fff; border-radius: 12px; box-shadow: 0 1px 3px rgba(0,0,0,0.08); }
+    .grade-badge { width: 88px; height: 88px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 2.25rem; font-weight: 800; color: #fff; flex-shrink: 0; box-shadow: 0 4px 12px rgba(0,0,0,0.15); }
+    .grade-A { background: linear-gradient(135deg, #22c55e, #16a34a); }
+    .grade-B { background: linear-gradient(135deg, #3b82f6, #2563eb); }
+    .grade-C { background: linear-gradient(135deg, #eab308, #ca8a04); }
+    .grade-D { background: linear-gradient(135deg, #f97316, #ea580c); }
+    .grade-F { background: linear-gradient(135deg, #ef4444, #dc2626); }
+    .grade-text h2 { font-size: 1.125rem; font-weight: 600; margin-bottom: 0.5rem; }
+    .grade-text p { color: #475569; font-size: 0.9375rem; }
+    .section-title { font-size: 1.25rem; font-weight: 700; margin-bottom: 1rem; padding-bottom: 0.5rem; border-bottom: 2px solid #e2e8f0; }
+    .findings-table { width: 100%; border-collapse: separate; border-spacing: 0; margin-bottom: 2.5rem; border-radius: 8px; overflow: hidden; box-shadow: 0 1px 3px rgba(0,0,0,0.08); }
+    .findings-table th { background: #1e293b; color: #fff; padding: 0.875rem 1rem; text-align: left; font-size: 0.8125rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; }
+    .findings-table td { padding: 0.875rem 1rem; border-bottom: 1px solid #e2e8f0; font-size: 0.875rem; vertical-align: top; background: #fff; }
+    .findings-table tr:last-child td { border-bottom: none; }
+    .findings-table tr:hover td { background: #f8fafc; }
+    .severity { display: inline-block; padding: 0.1875rem 0.625rem; border-radius: 9999px; font-size: 0.75rem; font-weight: 700; color: #fff; letter-spacing: 0.025em; }
+    .severity-critical { background: #dc2626; }
+    .severity-high { background: #ea580c; }
+    .severity-medium { background: #ca8a04; }
+    .severity-low { background: #65a30d; }
+    .file-path { font-family: 'SF Mono', 'Fira Code', Consolas, monospace; font-size: 0.8rem; color: #6366f1; word-break: break-all; }
+    .roadmap { margin-bottom: 2rem; }
+    .roadmap-item { background: #fff; border: 1px solid #e2e8f0; border-radius: 10px; padding: 1.25rem 1.5rem; margin-bottom: 0.75rem; display: flex; gap: 1rem; align-items: flex-start; box-shadow: 0 1px 2px rgba(0,0,0,0.04); }
+    .roadmap-number { width: 32px; height: 32px; background: linear-gradient(135deg, #3b82f6, #2563eb); color: #fff; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-weight: 700; font-size: 0.875rem; flex-shrink: 0; }
+    .roadmap-content strong { display: block; margin-bottom: 0.25rem; }
+    .roadmap-content p { color: #64748b; font-size: 0.875rem; margin: 0; }
+    .stats-bar { display: flex; gap: 1rem; margin-bottom: 2.5rem; flex-wrap: wrap; }
+    .stat-card { background: #fff; border: 1px solid #e2e8f0; border-radius: 8px; padding: 1rem 1.25rem; flex: 1; min-width: 120px; text-align: center; }
+    .stat-card .stat-value { font-size: 1.5rem; font-weight: 800; }
+    .stat-card .stat-label { font-size: 0.75rem; color: #64748b; margin-top: 0.25rem; }
+    .stat-critical { color: #dc2626; }
+    .stat-high { color: #ea580c; }
+    .stat-medium { color: #ca8a04; }
+    .stat-low { color: #65a30d; }
+    .footer { text-align: center; color: #94a3b8; font-size: 0.75rem; padding: 2rem 0; border-top: 1px solid #e2e8f0; margin-top: 2rem; }
+    .back-link { display: inline-block; margin-bottom: 1.5rem; color: #3b82f6; text-decoration: none; font-size: 0.875rem; font-weight: 500; }
+    .back-link:hover { text-decoration: underline; }
+  </style>
+</head>
+<body>
+  <div class="header">
+    <h1>テスト・可観測性レビュー</h1>
+    <div class="meta">Notta | 2026-01-29</div>
+  </div>
+  <div class="container">
+    <a href="index.html" class="back-link">&larr; ダッシュボードに戻る</a>
+
+    <div class="grade-section">
+      <div class="grade-badge grade-D">D</div>
+      <div class="grade-text">
+        <h2>総合評価</h2>
+        <p>テストファイルが一切存在せず、テストフレームワークの設定もない。ロギングはconsole.logベースで構造化されておらず、本番環境向けのログ管理が不足。エラートラッキング（Sentry等）未導入、ヘルスチェックエンドポイントはWebSocketサーバーにのみ存在。APMやメトリクス収集の仕組みもない。可観測性の基盤が全体的に欠如している。</p>
+      </div>
+    </div>
+
+    <div class="stats-bar">
+      <div class="stat-card">
+        <div class="stat-value stat-critical">2</div>
+        <div class="stat-label">Critical</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-value stat-high">3</div>
+        <div class="stat-label">High</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-value stat-medium">3</div>
+        <div class="stat-label">Medium</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-value stat-low">2</div>
+        <div class="stat-label">Low</div>
+      </div>
+    </div>
+
+    <h2 class="section-title">検出事項</h2>
+    <table class="findings-table">
+      <thead>
+        <tr>
+          <th>カテゴリ</th>
+          <th>ファイル</th>
+          <th>重要度</th>
+          <th>説明</th>
+          <th>推奨対応</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>テストカバレッジ</td>
+          <td class="file-path">（プロジェクト全体）</td>
+          <td><span class="severity severity-critical">CRITICAL</span></td>
+          <td>テストファイル（*.test.ts, *.spec.ts, __tests__/）が一切存在しない。テストフレームワーク（Jest, Vitest等）もpackage.jsonに含まれていない。0%カバレッジ。</td>
+          <td>Vitestを導入し、最低限のユニットテスト（バリデーション、ユーティリティ関数、AI分析ロジック）を追加。段階的にAPIルートの統合テストを追加。</td>
+        </tr>
+        <tr>
+          <td>エラートラッキング</td>
+          <td class="file-path">（プロジェクト全体）</td>
+          <td><span class="severity severity-critical">CRITICAL</span></td>
+          <td>Sentry等のエラートラッキングサービスが未導入。React Error Boundaryも未設定。本番環境でエラーが発生しても検知・通知されない。</td>
+          <td>Sentry（@sentry/nextjs）を導入し、サーバーサイド・クライアントサイド両方のエラーを捕捉する。React Error Boundaryも設定。</td>
+        </tr>
+        <tr>
+          <td>ロギング</td>
+          <td class="file-path">src/app/api/**/route.ts</td>
+          <td><span class="severity severity-high">HIGH</span></td>
+          <td>全ロギングがconsole.log/console.errorベース。構造化ログ（JSON形式）ではなく、ログレベルの管理もない。本番環境での分析・フィルタリングが困難。</td>
+          <td>pinoやwinstonで構造化ロガーを導入。リクエストID、セッションID、処理時間などのコンテキスト情報を含める。</td>
+        </tr>
+        <tr>
+          <td>モニタリング</td>
+          <td class="file-path">src/app/api/</td>
+          <td><span class="severity severity-high">HIGH</span></td>
+          <td>Next.jsアプリケーションにヘルスチェックエンドポイントがない（WebSocketサーバーにはあり）。DB接続状態やAI APIの死活監視もない。</td>
+          <td>/api/healthエンドポイントを追加し、DB接続・外部API接続状態を返す。</td>
+        </tr>
+        <tr>
+          <td>可観測性</td>
+          <td class="file-path">（プロジェクト全体）</td>
+          <td><span class="severity severity-high">HIGH</span></td>
+          <td>リクエストトレーシングや相関IDの仕組みがない。分散システム（Next.js + WebSocket + 外部API）でのリクエスト追跡が不可能。</td>
+          <td>リクエストIDをミドルウェアで生成し、全ログに付与。外部API呼び出しにも伝播させる。</td>
+        </tr>
+        <tr>
+          <td>ロギング</td>
+          <td class="file-path">src/app/api/topic-analysis/segment/route.ts:191,284</td>
+          <td><span class="severity severity-medium">MEDIUM</span></td>
+          <td>[TopicAnalysis]プレフィックス付きのログ出力は他ファイルより良好だが、構造化されていない。分析結果やコスト情報のログが不足。</td>
+          <td>分析ごとのコスト・トークン使用量・処理時間をログ出力し、利用状況の可視化に活用する。</td>
+        </tr>
+        <tr>
+          <td>ロギング</td>
+          <td class="file-path">src/app/api/webhooks/meeting-bot/route.ts:30-40</td>
+          <td><span class="severity severity-medium">MEDIUM</span></td>
+          <td>Webhookの受信ログにペイロードの要約が含まれるが、署名検証失敗時の警告ログが不十分。セキュリティイベントの監査証跡がない。</td>
+          <td>署名検証失敗時に警告レベルのログを出力し、送信元IPとペイロードハッシュを記録する。</td>
+        </tr>
+        <tr>
+          <td>テスト品質</td>
+          <td class="file-path">src/lib/validations/</td>
+          <td><span class="severity severity-medium">MEDIUM</span></td>
+          <td>Zodバリデーションスキーマがテストなしで使用されている。バリデーションルールの正確性が保証されない。</td>
+          <td>Zodスキーマのユニットテスト（正常値/異常値/境界値）を最優先で追加。</td>
+        </tr>
+        <tr>
+          <td>デバッグ支援</td>
+          <td class="file-path">next.config.js</td>
+          <td><span class="severity severity-low">LOW</span></td>
+          <td>ソースマップ設定はNext.jsデフォルト（開発モードで有効）。本番デバッグ用の設定は特になし。</td>
+          <td>Sentry導入時にソースマップアップロードを設定し、本番エラーのスタックトレースを可読化する。</td>
+        </tr>
+        <tr>
+          <td>監査ログ</td>
+          <td class="file-path">（プロジェクト全体）</td>
+          <td><span class="severity severity-low">LOW</span></td>
+          <td>ユーザー操作の監査ログ（ミーティング作成/削除、トランスクリプトアクセス等）がない。コンプライアンス上望ましい。</td>
+          <td>重要な操作に対して監査ログテーブルへの記録を追加。将来的なコンプライアンス対応の基盤にする。</td>
+        </tr>
+      </tbody>
+    </table>
+
+    <h2 class="section-title">改善ロードマップ</h2>
+    <div class="roadmap">
+      <div class="roadmap-item">
+        <div class="roadmap-number">1</div>
+        <div class="roadmap-content">
+          <strong>テストフレームワーク導入と初期テスト作成</strong>
+          <p>Vitestを導入し、Zodバリデーション・ユーティリティ関数・コスト計算ロジックのユニットテストを最優先で作成。CI/CDパイプラインでのテスト実行も設定。</p>
+        </div>
+      </div>
+      <div class="roadmap-item">
+        <div class="roadmap-number">2</div>
+        <div class="roadmap-content">
+          <strong>エラートラッキング導入（Sentry）</strong>
+          <p>@sentry/nextjsを導入し、サーバー/クライアント両方のエラーを捕捉。React Error Boundaryの設定とソースマップアップロードも含む。</p>
+        </div>
+      </div>
+      <div class="roadmap-item">
+        <div class="roadmap-number">3</div>
+        <div class="roadmap-content">
+          <strong>構造化ロガーの導入</strong>
+          <p>pino（Next.js互換性高）を導入し、全console.log/errorを構造化ログに置換。リクエストID、処理時間、AI APIコストをログコンテキストに含める。</p>
+        </div>
+      </div>
+      <div class="roadmap-item">
+        <div class="roadmap-number">4</div>
+        <div class="roadmap-content">
+          <strong>ヘルスチェック・メトリクスエンドポイント</strong>
+          <p>/api/healthエンドポイントを追加。DB接続、外部API（Deepgram, AssemblyAI, OpenAI, Meeting BaaS）のステータスを返す。</p>
+        </div>
+      </div>
+      <div class="roadmap-item">
+        <div class="roadmap-number">5</div>
+        <div class="roadmap-content">
+          <strong>APIルート統合テストの追加</strong>
+          <p>主要APIルート（transcripts CRUD、meetings CRUD、topic-analysis）の統合テストを追加。認証・認可・バリデーションのテストを網羅。</p>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div class="footer">
+    Generated by Claude Code Project Review | 2026-01-29T00:00:00Z
+  </div>
+</body>
+</html>
