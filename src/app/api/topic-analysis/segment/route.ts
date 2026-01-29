@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server'
 import { auth } from '@/lib/auth/auth'
+import { prisma } from '@/lib/db/prisma'
 import { analyzeTopics, generateFacilitatorMessage, compressConversation, type TopicAnalysisResult, type TokenUsage } from '@/lib/ai/topic-analyzer'
 
 // モデル別料金（USD per 1M tokens）
@@ -32,54 +33,102 @@ interface UsageStats {
   callCount: number
 }
 
-// 録音セッション用のトピック状態（メモリ内管理）
-interface RecordingTopicState {
-  sessionId: string
-  mainTopic: string | null
-  currentTopic: string | null
-  topicHistory: string[]
-  pendingSegments: Array<{ speaker: string; text: string; startTime: number }>
-  lastAnalyzedAt: number | null
+// アラート型
+interface Alert {
+  id: string
+  alertType: 'TOPIC_DRIFT' | 'RETURNING' | 'NEW_TOPIC'
+  message: string
   driftScore: number
-  analysisCount: number
-  alerts: Array<{
-    id: string
-    alertType: 'TOPIC_DRIFT' | 'RETURNING' | 'NEW_TOPIC'
-    message: string
-    driftScore: number
-    fromTopic: string | null
-    toTopic: string | null
-    currentTopic: string
-    mainTopic: string | null
-    timestamp: string
-  }>
-  // コスト追跡
-  usageStats: UsageStats
-  // 圧縮用
-  conversationSummary: string | null
-  allProcessedSegments: Array<{ speaker: string; text: string }>
+  fromTopic: string | null
+  toTopic: string | null
+  currentTopic: string
+  mainTopic: string | null
+  timestamp: string
 }
-
-// セッションごとの状態を保持
-const recordingStates = new Map<string, RecordingTopicState>()
 
 // 設定
 const MIN_SEGMENTS_FOR_ANALYSIS = 3
 const MIN_INTERVAL_MS = 15000 // 15秒
 const MAX_INTERVAL_MS = 30000 // 30秒
-const SESSION_TIMEOUT_MS = 60 * 60 * 1000 // 1時間で自動クリーンアップ
 
-// 古いセッションの定期クリーンアップ
-setInterval(() => {
-  const now = Date.now()
-  for (const [sessionId, state] of recordingStates.entries()) {
-    const lastActivity = state.lastAnalyzedAt || 0
-    if (now - lastActivity > SESSION_TIMEOUT_MS) {
-      recordingStates.delete(sessionId)
-      console.log(`[TopicAnalysis] Cleaned up stale session: ${sessionId}`)
+// DB からセッション状態を取得（なければ作成）
+async function getOrCreateState(sessionId: string) {
+  const existing = await prisma.topicAnalysisState.findUnique({
+    where: { id: sessionId },
+  })
+
+  if (existing) {
+    return {
+      sessionId: existing.id,
+      mainTopic: existing.mainTopic,
+      currentTopic: existing.currentTopic,
+      topicHistory: existing.topicHistory,
+      pendingSegments: existing.pendingSegments as unknown as Array<{ speaker: string; text: string; startTime: number }>,
+      lastAnalyzedAt: existing.lastAnalyzedAt ? existing.lastAnalyzedAt.getTime() : null,
+      driftScore: existing.driftScore,
+      analysisCount: existing.analysisCount,
+      alerts: existing.alerts as unknown as Alert[],
+      usageStats: existing.usageStats as unknown as UsageStats,
+      conversationSummary: existing.conversationSummary,
+      allProcessedSegments: existing.allProcessedSegments as unknown as Array<{ speaker: string; text: string }>,
     }
   }
-}, 5 * 60 * 1000) // 5分ごとにチェック
+
+  // 新規作成
+  const defaultUsageStats: UsageStats = {
+    totalInputTokens: 0,
+    totalOutputTokens: 0,
+    totalCost: 0,
+    callCount: 0,
+  }
+
+  await prisma.topicAnalysisState.create({
+    data: {
+      id: sessionId,
+      pendingSegments: [],
+      alerts: [],
+      usageStats: defaultUsageStats as unknown as import('@prisma/client').Prisma.InputJsonValue,
+      allProcessedSegments: [],
+    },
+  })
+
+  console.log(`[TopicAnalysis] New session: ${sessionId}`)
+
+  return {
+    sessionId,
+    mainTopic: null as string | null,
+    currentTopic: null as string | null,
+    topicHistory: [] as string[],
+    pendingSegments: [] as Array<{ speaker: string; text: string; startTime: number }>,
+    lastAnalyzedAt: null as number | null,
+    driftScore: 0,
+    analysisCount: 0,
+    alerts: [] as Alert[],
+    usageStats: defaultUsageStats,
+    conversationSummary: null as string | null,
+    allProcessedSegments: [] as Array<{ speaker: string; text: string }>,
+  }
+}
+
+// DB にセッション状態を保存
+async function saveState(state: Awaited<ReturnType<typeof getOrCreateState>>) {
+  await prisma.topicAnalysisState.update({
+    where: { id: state.sessionId },
+    data: {
+      mainTopic: state.mainTopic,
+      currentTopic: state.currentTopic,
+      topicHistory: state.topicHistory,
+      pendingSegments: state.pendingSegments as unknown as import('@prisma/client').Prisma.InputJsonValue,
+      lastAnalyzedAt: state.lastAnalyzedAt ? new Date(state.lastAnalyzedAt) : null,
+      driftScore: state.driftScore,
+      analysisCount: state.analysisCount,
+      alerts: state.alerts as unknown as import('@prisma/client').Prisma.InputJsonValue,
+      usageStats: state.usageStats as unknown as import('@prisma/client').Prisma.InputJsonValue,
+      conversationSummary: state.conversationSummary,
+      allProcessedSegments: state.allProcessedSegments as unknown as import('@prisma/client').Prisma.InputJsonValue,
+    },
+  })
+}
 
 export async function POST(request: Request) {
   try {
@@ -97,36 +146,15 @@ export async function POST(request: Request) {
 
     // セッション終了
     if (action === 'end') {
-      recordingStates.delete(sessionId)
+      await prisma.topicAnalysisState.deleteMany({
+        where: { id: sessionId },
+      })
       console.log(`[TopicAnalysis] Session ended: ${sessionId}`)
       return NextResponse.json({ success: true })
     }
 
     // セッション状態取得または初期化
-    let state = recordingStates.get(sessionId)
-    if (!state) {
-      state = {
-        sessionId,
-        mainTopic: null,
-        currentTopic: null,
-        topicHistory: [],
-        pendingSegments: [],
-        lastAnalyzedAt: null,
-        driftScore: 0,
-        analysisCount: 0,
-        alerts: [],
-        usageStats: {
-          totalInputTokens: 0,
-          totalOutputTokens: 0,
-          totalCost: 0,
-          callCount: 0,
-        },
-        conversationSummary: null,
-        allProcessedSegments: [],
-      }
-      recordingStates.set(sessionId, state)
-      console.log(`[TopicAnalysis] New session: ${sessionId}`)
-    }
+    const state = await getOrCreateState(sessionId)
 
     // セグメントが提供された場合、追加
     if (segment) {
@@ -157,7 +185,7 @@ export async function POST(request: Request) {
       (hasEnoughSegments && isMinIntervalPassed) || isMaxIntervalPassed
 
     let analysisResult: TopicAnalysisResult | null = null
-    let newAlert: RecordingTopicState['alerts'][0] | null = null
+    let newAlert: Alert | null = null
 
     if (shouldAnalyze) {
       console.log(`[TopicAnalysis] Analyzing session: ${sessionId}, segments: ${state.pendingSegments.length}`)
@@ -260,6 +288,9 @@ export async function POST(request: Request) {
         console.error(`[TopicAnalysis] Analysis failed for session ${sessionId}:`, error)
       }
     }
+
+    // DB に状態を保存
+    await saveState(state)
 
     return NextResponse.json({
       topicState: {

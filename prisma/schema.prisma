@@ -167,6 +167,26 @@ model FacilitatorAlert {
   @@schema("notta")
 }
 
+model TopicAnalysisState {
+  id                   String   @id // sessionId をそのまま使用
+  mainTopic            String?
+  currentTopic         String?
+  topicHistory         String[] @default([])
+  pendingSegments      Json     @default("[]") // Array<{ speaker, text, startTime }>
+  lastAnalyzedAt       DateTime?
+  driftScore           Float    @default(0)
+  analysisCount        Int      @default(0)
+  alerts               Json     @default("[]") // Array<Alert>
+  usageStats           Json     @default("{}") // UsageStats
+  conversationSummary  String?
+  allProcessedSegments Json     @default("[]") // Array<{ speaker, text }>
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@schema("notta")
+}
+
 model CalendarConnection {
   id             String           @id @default(cuid())
   userId         String           @db.Uuid
